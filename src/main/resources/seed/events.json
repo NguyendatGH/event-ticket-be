@@ -1,0 +1,835 @@
+[
+  {
+    "slug": "the-lumiere-tour",
+    "name": "The Lumière Tour",
+    "category": "music",
+    "startsAt": "2026-10-24T19:00:00+07:00",
+    "endsAt": "2026-10-24T22:30:00+07:00",
+    "venue": {
+      "name": "Sân vận động Quốc gia Mỹ Đình",
+      "city": "Hà Nội",
+      "address": "Đường Lê Đức Thọ, Nam Từ Liêm, Hà Nội"
+    },
+    "coverImageUrl": "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&w=1600&q=80",
+    "coverImageAlt": "Đám đông giơ tay trước sân khấu trong đêm nhạc",
+    "tagline": "Hành trình âm nhạc bùng nổ với dàn sản xuất quốc tế và sân khấu 360 độ.",
+    "description": [
+      "The Lumière Tour là chuỗi đêm diễn lớn nhất năm 2026, đưa toàn bộ ekip sản xuất từ chặng châu Âu về Hà Nội. Sân khấu dựng theo mô hình 360 độ với hệ thống đèn kinetic và màn LED bao quanh khán đài.",
+      "Chương trình kéo dài 3 tiếng 30 phút, gồm hai phần trình diễn chính và một khách mời đặc biệt sẽ được công bố trước đêm diễn một tuần.",
+      "Vé được phát hành dưới dạng vé điện tử gắn với tài khoản của bạn. Cổng mở lúc 17:00, khuyến khích đến sớm để tránh ùn tắc khu vực soát vé."
+    ],
+    "schedule": [
+      {
+        "time": "17:00",
+        "title": "Mở cổng"
+      },
+      {
+        "time": "19:00",
+        "title": "Khai mạc, khách mời mở màn"
+      },
+      {
+        "time": "20:00",
+        "title": "Phần 1: Lumière"
+      },
+      {
+        "time": "21:15",
+        "title": "Phần 2: Afterglow"
+      },
+      {
+        "time": "22:30",
+        "title": "Kết thúc"
+      }
+    ],
+    "organizer": {
+      "name": "Sunrise Live",
+      "description": "Đơn vị tổ chức các tour diễn quốc tế tại Việt Nam từ 2015.",
+      "verified": true
+    },
+    "featured": true,
+    "status": "PUBLISHED",
+    "tiers": [
+      {
+        "name": "VIP",
+        "description": "Vị trí đẹp nhất, lối vào riêng",
+        "price": 2500000,
+        "maxPerOrder": 4,
+        "quantity": 42
+      },
+      {
+        "name": "GA 1",
+        "description": "Khu vực trung tâm",
+        "price": 1500000,
+        "maxPerOrder": 6,
+        "quantity": 310
+      },
+      {
+        "name": "GA 2",
+        "description": "Khu vực phía sau",
+        "price": 800000,
+        "maxPerOrder": 6,
+        "quantity": 1280
+      }
+    ]
+  },
+  {
+    "slug": "saigon-sound-festival",
+    "name": "Saigon Sound Festival",
+    "category": "music",
+    "startsAt": "2026-11-07T16:00:00+07:00",
+    "endsAt": "2026-11-07T23:00:00+07:00",
+    "venue": {
+      "name": "Công viên Lê Văn Tám",
+      "city": "TP.HCM",
+      "address": "Hai Bà Trưng, Quận 1, TP.HCM"
+    },
+    "coverImageUrl": "https://images.unsplash.com/photo-1501386761578-eac5c94b800a?auto=format&fit=crop&w=1600&q=80",
+    "coverImageAlt": "Sân khấu lễ hội âm nhạc với ánh sáng và khán giả",
+    "tagline": "Hai sân khấu, mười hai nghệ sĩ, một buổi chiều đến đêm giữa lòng Sài Gòn.",
+    "description": [
+      "Saigon Sound Festival quy tụ các nghệ sĩ indie, electronic và hip hop nổi bật nhất năm trên hai sân khấu chạy song song.",
+      "Khu vực ẩm thực và chợ đêm mở từ 15:00. Vé một ngày cho phép ra vào tự do trong khung giờ sự kiện."
+    ],
+    "schedule": [
+      {
+        "time": "15:00",
+        "title": "Mở cổng, khu ẩm thực hoạt động"
+      },
+      {
+        "time": "16:00",
+        "title": "Sân khấu Sông: set mở màn"
+      },
+      {
+        "time": "19:30",
+        "title": "Sân khấu Phố: headliner"
+      },
+      {
+        "time": "23:00",
+        "title": "Kết thúc"
+      }
+    ],
+    "organizer": {
+      "name": "Bờ Đông Collective",
+      "description": "Nhóm sản xuất lễ hội âm nhạc độc lập tại TP.HCM.",
+      "verified": true
+    },
+    "featured": true,
+    "status": "PUBLISHED",
+    "tiers": [
+      {
+        "name": "Early Bird",
+        "description": "Số lượng giới hạn",
+        "price": 650000,
+        "maxPerOrder": 4,
+        "quantity": 0
+      },
+      {
+        "name": "Regular",
+        "description": "Vé tiêu chuẩn",
+        "price": 850000,
+        "maxPerOrder": 6,
+        "quantity": 940
+      },
+      {
+        "name": "VIP Deck",
+        "description": "Khu vực nâng cao, đồ uống kèm",
+        "price": 1900000,
+        "maxPerOrder": 4,
+        "quantity": 58
+      }
+    ]
+  },
+  {
+    "slug": "dem-nhac-trinh",
+    "name": "Đêm Nhạc Trịnh",
+    "category": "music",
+    "startsAt": "2026-10-31T20:00:00+07:00",
+    "endsAt": "2026-10-31T22:00:00+07:00",
+    "venue": {
+      "name": "Nhà hát Lớn Hà Nội",
+      "city": "Hà Nội",
+      "address": "1 Tràng Tiền, Hoàn Kiếm, Hà Nội"
+    },
+    "coverImageUrl": "https://images.unsplash.com/photo-1459749411175-04bf5292ceea?auto=format&fit=crop&w=1600&q=80",
+    "coverImageAlt": "Ca sĩ trên sân khấu dưới ánh đèn",
+    "tagline": "Những ca khúc của Trịnh Công Sơn với dàn nhạc thính phòng.",
+    "description": [
+      "Đêm nhạc tưởng nhớ Trịnh Công Sơn với phần phối khí mới cho dàn nhạc thính phòng 24 nhạc công."
+    ],
+    "schedule": [
+      {
+        "time": "19:15",
+        "title": "Mở cổng"
+      },
+      {
+        "time": "20:00",
+        "title": "Bắt đầu"
+      },
+      {
+        "time": "22:00",
+        "title": "Kết thúc"
+      }
+    ],
+    "organizer": {
+      "name": "Nhà hát Lớn Hà Nội",
+      "description": "Đơn vị biểu diễn nghệ thuật quốc gia.",
+      "verified": true
+    },
+    "featured": false,
+    "status": "PUBLISHED",
+    "tiers": [
+      {
+        "name": "Hạng A",
+        "description": "Tầng 1, hàng 1-10",
+        "price": 1200000,
+        "maxPerOrder": 4,
+        "quantity": 24
+      },
+      {
+        "name": "Hạng B",
+        "description": "Tầng 1, hàng 11-20",
+        "price": 800000,
+        "maxPerOrder": 4,
+        "quantity": 112
+      },
+      {
+        "name": "Hạng C",
+        "description": "Tầng 2",
+        "price": 500000,
+        "maxPerOrder": 4,
+        "quantity": 180
+      }
+    ]
+  },
+  {
+    "slug": "indie-night-vol-12",
+    "name": "Indie Night Vol. 12",
+    "category": "music",
+    "startsAt": "2026-11-15T20:30:00+07:00",
+    "endsAt": "2026-11-15T23:30:00+07:00",
+    "venue": {
+      "name": "Yoko Café",
+      "city": "TP.HCM",
+      "address": "22A Nguyễn Thị Diệu, Quận 3, TP.HCM"
+    },
+    "coverImageUrl": "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=1600&q=80",
+    "coverImageAlt": "Khán giả giơ tay trong ánh sáng sân khấu",
+    "tagline": "Bốn ban nhạc indie trong không gian 200 chỗ.",
+    "description": [
+      "Số thứ 12 của chuỗi Indie Night với bốn ban nhạc trẻ đến từ Sài Gòn và Đà Lạt."
+    ],
+    "schedule": [
+      {
+        "time": "20:00",
+        "title": "Mở cửa"
+      },
+      {
+        "time": "20:30",
+        "title": "Ban nhạc 1"
+      },
+      {
+        "time": "23:30",
+        "title": "Kết thúc"
+      }
+    ],
+    "organizer": {
+      "name": "Yoko Café",
+      "description": "Không gian nhạc sống tại Quận 3.",
+      "verified": false
+    },
+    "featured": false,
+    "status": "PUBLISHED",
+    "tiers": [
+      {
+        "name": "Standing",
+        "description": "Vé đứng",
+        "price": 250000,
+        "maxPerOrder": 4,
+        "quantity": 61
+      }
+    ]
+  },
+  {
+    "slug": "da-nang-beach-fest",
+    "name": "Đà Nẵng Beach Fest",
+    "category": "music",
+    "startsAt": "2026-12-12T17:00:00+07:00",
+    "endsAt": "2026-12-12T23:30:00+07:00",
+    "venue": {
+      "name": "Bãi biển Mỹ Khê",
+      "city": "Đà Nẵng",
+      "address": "Võ Nguyên Giáp, Sơn Trà, Đà Nẵng"
+    },
+    "coverImageUrl": "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=1600&q=80",
+    "coverImageAlt": "Đám đông tại một buổi hòa nhạc ngoài trời",
+    "tagline": "Lễ hội âm nhạc bên biển, mở bán ngày 01.10.",
+    "description": [
+      "Lễ hội âm nhạc ngoài trời bên bờ biển Mỹ Khê với sân khấu chính hướng ra biển."
+    ],
+    "schedule": [
+      {
+        "time": "17:00",
+        "title": "Mở cổng"
+      },
+      {
+        "time": "18:30",
+        "title": "Sân khấu chính"
+      },
+      {
+        "time": "23:30",
+        "title": "Kết thúc"
+      }
+    ],
+    "organizer": {
+      "name": "Sunrise Live",
+      "description": "Đơn vị tổ chức các tour diễn quốc tế tại Việt Nam từ 2015.",
+      "verified": true
+    },
+    "featured": true,
+    "status": "UPCOMING",
+    "tiers": [
+      {
+        "name": "GA",
+        "description": "Vé phổ thông",
+        "price": 450000,
+        "maxPerOrder": 6,
+        "quantity": 0
+      },
+      {
+        "name": "VIP",
+        "description": "Khu vực gần sân khấu",
+        "price": 1200000,
+        "maxPerOrder": 4,
+        "quantity": 0
+      }
+    ]
+  },
+  {
+    "slug": "monsoon-music-festival",
+    "name": "Monsoon Music Festival",
+    "category": "music",
+    "startsAt": "2026-11-21T18:00:00+07:00",
+    "endsAt": "2026-11-21T23:00:00+07:00",
+    "venue": {
+      "name": "Hoàng thành Thăng Long",
+      "city": "Hà Nội",
+      "address": "19C Hoàng Diệu, Ba Đình, Hà Nội"
+    },
+    "coverImageUrl": "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=1600&q=80",
+    "coverImageAlt": "Lễ hội âm nhạc với ánh đèn sân khấu về đêm",
+    "tagline": "Hai đêm nhạc quốc tế trong không gian di sản.",
+    "description": [
+      "Monsoon trở lại Hoàng thành với hai đêm diễn, sáu nghệ sĩ quốc tế và tám nghệ sĩ Việt Nam."
+    ],
+    "schedule": [
+      {
+        "time": "17:00",
+        "title": "Mở cổng"
+      },
+      {
+        "time": "18:00",
+        "title": "Bắt đầu"
+      },
+      {
+        "time": "23:00",
+        "title": "Kết thúc"
+      }
+    ],
+    "organizer": {
+      "name": "Thanh Việt Production",
+      "description": "Nhà sản xuất Monsoon từ 2014.",
+      "verified": true
+    },
+    "featured": false,
+    "status": "PUBLISHED",
+    "tiers": [
+      {
+        "name": "Vé 1 ngày",
+        "description": "Chọn ngày khi nhận vé",
+        "price": 700000,
+        "maxPerOrder": 6,
+        "quantity": 520
+      },
+      {
+        "name": "Vé 2 ngày",
+        "description": "Cả hai đêm",
+        "price": 1200000,
+        "maxPerOrder": 4,
+        "quantity": 210
+      }
+    ]
+  },
+  {
+    "slug": "hamlet-ban-dung-moi",
+    "name": "Hamlet: Bản dựng mới",
+    "category": "theatre",
+    "startsAt": "2026-10-18T19:30:00+07:00",
+    "endsAt": "2026-10-18T22:00:00+07:00",
+    "venue": {
+      "name": "Nhà hát Tuổi Trẻ",
+      "city": "Hà Nội",
+      "address": "11 Ngô Thì Nhậm, Hai Bà Trưng, Hà Nội"
+    },
+    "coverImageUrl": "https://images.unsplash.com/photo-1503095396549-807759245b35?auto=format&fit=crop&w=1600&q=80",
+    "coverImageAlt": "Sân khấu kịch với ánh sáng tập trung",
+    "tagline": "Bi kịch của Shakespeare trong bối cảnh Hà Nội đương đại.",
+    "description": [
+      "Bản dựng mới của Hamlet do đạo diễn Lê Quý Dương thực hiện, thời lượng 150 phút có nghỉ giữa giờ."
+    ],
+    "schedule": [
+      {
+        "time": "19:00",
+        "title": "Mở cửa"
+      },
+      {
+        "time": "19:30",
+        "title": "Màn 1"
+      },
+      {
+        "time": "20:45",
+        "title": "Nghỉ giữa giờ"
+      },
+      {
+        "time": "22:00",
+        "title": "Kết thúc"
+      }
+    ],
+    "organizer": {
+      "name": "Nhà hát Tuổi Trẻ",
+      "description": "Nhà hát kịch quốc gia.",
+      "verified": true
+    },
+    "featured": false,
+    "status": "PUBLISHED",
+    "tiers": [
+      {
+        "name": "Hạng A",
+        "description": "Hàng 1-8",
+        "price": 600000,
+        "maxPerOrder": 4,
+        "quantity": 40
+      },
+      {
+        "name": "Hạng B",
+        "description": "Hàng 9-20",
+        "price": 300000,
+        "maxPerOrder": 4,
+        "quantity": 156
+      }
+    ]
+  },
+  {
+    "slug": "v-league-ha-noi-vs-hagl",
+    "name": "V.League: Hà Nội FC vs HAGL",
+    "category": "sport",
+    "startsAt": "2026-10-26T19:15:00+07:00",
+    "endsAt": "2026-10-26T21:15:00+07:00",
+    "venue": {
+      "name": "Sân vận động Hàng Đẫy",
+      "city": "Hà Nội",
+      "address": "9 Trịnh Hoài Đức, Đống Đa, Hà Nội"
+    },
+    "coverImageUrl": "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?auto=format&fit=crop&w=1600&q=80",
+    "coverImageAlt": "Sân vận động sáng đèn trong trận đấu",
+    "tagline": "Vòng 8 V.League 2026-27.",
+    "description": [
+      "Trận đấu vòng 8 giữa Hà Nội FC và Hoàng Anh Gia Lai tại Hàng Đẫy."
+    ],
+    "schedule": [
+      {
+        "time": "17:45",
+        "title": "Mở cổng"
+      },
+      {
+        "time": "19:15",
+        "title": "Bóng lăn"
+      },
+      {
+        "time": "21:15",
+        "title": "Kết thúc"
+      }
+    ],
+    "organizer": {
+      "name": "Hà Nội FC",
+      "description": "Câu lạc bộ bóng đá Hà Nội.",
+      "verified": true
+    },
+    "featured": false,
+    "status": "PUBLISHED",
+    "tiers": [
+      {
+        "name": "Khán đài A",
+        "description": "Có mái che",
+        "price": 300000,
+        "maxPerOrder": 6,
+        "quantity": 380
+      },
+      {
+        "name": "Khán đài B",
+        "description": "Đối diện khán đài A",
+        "price": 200000,
+        "maxPerOrder": 6,
+        "quantity": 640
+      },
+      {
+        "name": "Khán đài C, D",
+        "description": "Sau cầu môn",
+        "price": 120000,
+        "maxPerOrder": 8,
+        "quantity": 1500
+      }
+    ]
+  },
+  {
+    "slug": "vietnam-web-summit-2026",
+    "name": "Vietnam Web Summit 2026",
+    "category": "conference",
+    "startsAt": "2026-11-28T08:30:00+07:00",
+    "endsAt": "2026-11-28T17:30:00+07:00",
+    "venue": {
+      "name": "GEM Center",
+      "city": "TP.HCM",
+      "address": "8 Nguyễn Bỉnh Khiêm, Quận 1, TP.HCM"
+    },
+    "coverImageUrl": "https://images.unsplash.com/photo-1540575467063-178a50c2df87?auto=format&fit=crop&w=1600&q=80",
+    "coverImageAlt": "Khán phòng hội thảo với diễn giả trên sân khấu",
+    "tagline": "Một ngày, ba sân khấu, 40 diễn giả về sản phẩm và hạ tầng.",
+    "description": [
+      "Hội thảo thường niên dành cho người làm sản phẩm số tại Việt Nam."
+    ],
+    "schedule": [
+      {
+        "time": "08:30",
+        "title": "Đăng ký, cà phê sáng"
+      },
+      {
+        "time": "09:30",
+        "title": "Keynote"
+      },
+      {
+        "time": "12:00",
+        "title": "Ăn trưa"
+      },
+      {
+        "time": "17:30",
+        "title": "Kết thúc"
+      }
+    ],
+    "organizer": {
+      "name": "TechSummit VN",
+      "description": "Tổ chức hội thảo công nghệ từ 2018.",
+      "verified": true
+    },
+    "featured": false,
+    "status": "PUBLISHED",
+    "tiers": [
+      {
+        "name": "Standard",
+        "description": "Toàn bộ chương trình",
+        "price": 1500000,
+        "maxPerOrder": 5,
+        "quantity": 220
+      },
+      {
+        "name": "Team (5 vé)",
+        "description": "Giá cho nhóm 5 người",
+        "price": 6000000,
+        "maxPerOrder": 2,
+        "quantity": 30
+      }
+    ]
+  },
+  {
+    "slug": "trien-lam-anh-duong-pho",
+    "name": "Triển lãm ảnh: Đường phố 1990-2020",
+    "category": "exhibition",
+    "startsAt": "2026-10-10T09:00:00+07:00",
+    "endsAt": "2026-10-10T18:00:00+07:00",
+    "venue": {
+      "name": "Bảo tàng Mỹ thuật TP.HCM",
+      "city": "TP.HCM",
+      "address": "97A Phó Đức Chính, Quận 1, TP.HCM"
+    },
+    "coverImageUrl": "https://images.unsplash.com/photo-1531058020387-3be344556be6?auto=format&fit=crop&w=1600&q=80",
+    "coverImageAlt": "Không gian triển lãm với khách tham quan",
+    "tagline": "Ba mươi năm đường phố Sài Gòn qua ống kính bảy nhiếp ảnh gia.",
+    "description": [
+      "Triển lãm kéo dài đến 30.11.2026. Vé có hiệu lực trong một ngày tùy chọn."
+    ],
+    "schedule": [
+      {
+        "time": "09:00",
+        "title": "Mở cửa"
+      },
+      {
+        "time": "18:00",
+        "title": "Đóng cửa"
+      }
+    ],
+    "organizer": {
+      "name": "Bảo tàng Mỹ thuật TP.HCM",
+      "description": "Bảo tàng nghệ thuật thành phố.",
+      "verified": true
+    },
+    "featured": false,
+    "status": "PUBLISHED",
+    "tiers": [
+      {
+        "name": "Người lớn",
+        "description": "",
+        "price": 80000,
+        "maxPerOrder": 10,
+        "quantity": 5000
+      },
+      {
+        "name": "Sinh viên",
+        "description": "Xuất trình thẻ tại cửa",
+        "price": 40000,
+        "maxPerOrder": 10,
+        "quantity": 5000
+      }
+    ]
+  },
+  {
+    "slug": "workshop-gom-raku",
+    "name": "Workshop gốm Raku",
+    "category": "workshop",
+    "startsAt": "2026-10-17T14:00:00+07:00",
+    "endsAt": "2026-10-17T17:30:00+07:00",
+    "venue": {
+      "name": "Xưởng Đất",
+      "city": "Đà Nẵng",
+      "address": "48 Nguyễn Văn Linh, Hải Châu, Đà Nẵng"
+    },
+    "coverImageUrl": "https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=1600&q=80",
+    "coverImageAlt": "Bàn tay đang nặn gốm tại xưởng",
+    "tagline": "Nung gốm theo kỹ thuật Raku Nhật Bản, nhóm 8 người.",
+    "description": [
+      "Buổi thực hành 3 tiếng 30 phút, bao gồm nguyên liệu và một sản phẩm mang về."
+    ],
+    "schedule": [
+      {
+        "time": "14:00",
+        "title": "Giới thiệu kỹ thuật"
+      },
+      {
+        "time": "15:00",
+        "title": "Tạo hình"
+      },
+      {
+        "time": "16:30",
+        "title": "Nung và hoàn thiện"
+      }
+    ],
+    "organizer": {
+      "name": "Xưởng Đất",
+      "description": "Xưởng gốm thủ công tại Đà Nẵng.",
+      "verified": false
+    },
+    "featured": false,
+    "status": "PUBLISHED",
+    "tiers": [
+      {
+        "name": "Một chỗ",
+        "description": "",
+        "price": 550000,
+        "maxPerOrder": 2,
+        "quantity": 0
+      }
+    ]
+  },
+  {
+    "slug": "jazz-under-the-bridge",
+    "name": "Jazz Under the Bridge",
+    "category": "music",
+    "startsAt": "2026-11-02T19:30:00+07:00",
+    "endsAt": "2026-11-02T22:00:00+07:00",
+    "venue": {
+      "name": "Bến Bạch Đằng",
+      "city": "TP.HCM",
+      "address": "Tôn Đức Thắng, Quận 1, TP.HCM"
+    },
+    "coverImageUrl": "https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?auto=format&fit=crop&w=1600&q=80",
+    "coverImageAlt": "Ban nhạc biểu diễn dưới ánh đèn ấm",
+    "tagline": "Jazz ngoài trời bên sông Sài Gòn.",
+    "description": [
+      "Đêm jazz ngoài trời với ba nhóm nhạc từ Hà Nội, Sài Gòn và Bangkok."
+    ],
+    "schedule": [
+      {
+        "time": "19:00",
+        "title": "Mở cổng"
+      },
+      {
+        "time": "19:30",
+        "title": "Bắt đầu"
+      },
+      {
+        "time": "22:00",
+        "title": "Kết thúc"
+      }
+    ],
+    "organizer": {
+      "name": "Saigon Jazz Club",
+      "description": "Cộng đồng jazz tại TP.HCM.",
+      "verified": false
+    },
+    "featured": false,
+    "status": "PUBLISHED",
+    "tiers": [
+      {
+        "name": "GA",
+        "description": "Vé đứng, tự do",
+        "price": 350000,
+        "maxPerOrder": 6,
+        "quantity": 400
+      },
+      {
+        "name": "Bàn 4 người",
+        "description": "Gần sân khấu",
+        "price": 2400000,
+        "maxPerOrder": 1,
+        "quantity": 12
+      }
+    ]
+  },
+  {
+    "slug": "sunrise-summer-sessions-2026",
+    "name": "Sunrise Summer Sessions 2026",
+    "category": "music",
+    "startsAt": "2026-08-22T19:00:00+07:00",
+    "endsAt": "2026-08-22T22:30:00+07:00",
+    "venue": {
+      "name": "Cung Điền kinh Mỹ Đình",
+      "city": "Hà Nội",
+      "address": "Lê Đức Thọ, Nam Từ Liêm, Hà Nội"
+    },
+    "coverImageUrl": "https://images.unsplash.com/photo-1459749411175-04bf5292ceea?auto=format&fit=crop&w=1600&q=80",
+    "coverImageAlt": "Sân khấu ngoài trời rực đèn trong đêm hè",
+    "tagline": "Đêm nhạc mùa hè với năm nghệ sĩ indie và pop hàng đầu.",
+    "description": [
+      "Sunrise Summer Sessions là đêm nhạc mùa hè thường niên của Sunrise Live, quy tụ năm nghệ sĩ indie và pop.",
+      "Sự kiện đã diễn ra, cảm ơn khán giả đã đồng hành."
+    ],
+    "schedule": [
+      {
+        "time": "17:30",
+        "title": "Mở cổng"
+      },
+      {
+        "time": "19:00",
+        "title": "Bắt đầu"
+      },
+      {
+        "time": "22:30",
+        "title": "Kết thúc"
+      }
+    ],
+    "organizer": {
+      "name": "Sunrise Live",
+      "description": "Đơn vị tổ chức các tour diễn quốc tế tại Việt Nam từ 2015.",
+      "verified": true
+    },
+    "featured": false,
+    "status": "PUBLISHED",
+    "tiers": [
+      {
+        "name": "GA",
+        "description": "Khu vực đứng",
+        "price": 600000,
+        "maxPerOrder": 6,
+        "quantity": 35
+      },
+      {
+        "name": "VIP",
+        "description": "Khu vực sát sân khấu, quà tặng",
+        "price": 1500000,
+        "maxPerOrder": 4,
+        "quantity": 4
+      }
+    ]
+  },
+  {
+    "slug": "jazz-nights-vol-7",
+    "name": "Jazz Nights Vol. 7",
+    "category": "music",
+    "startsAt": "2026-09-06T20:00:00+07:00",
+    "endsAt": "2026-09-06T22:30:00+07:00",
+    "venue": {
+      "name": "Saigon Jazz Club",
+      "city": "TP.HCM",
+      "address": "Lê Lợi, Quận 1, TP.HCM"
+    },
+    "coverImageUrl": "https://images.unsplash.com/photo-1511192336575-5a79af67a629?auto=format&fit=crop&w=1600&q=80",
+    "coverImageAlt": "Nghệ sĩ saxophone dưới ánh đèn vàng",
+    "tagline": "Một đêm swing và bebop trong không gian club ấm cúng.",
+    "description": [
+      "Jazz Nights Vol. 7 mang tới ba set diễn swing, bebop và bossa nova từ các nghệ sĩ thường trú của club.",
+      "Sự kiện đã diễn ra."
+    ],
+    "schedule": [
+      {
+        "time": "19:30",
+        "title": "Mở cửa"
+      },
+      {
+        "time": "20:00",
+        "title": "Set 1"
+      },
+      {
+        "time": "21:15",
+        "title": "Set 2"
+      }
+    ],
+    "organizer": {
+      "name": "Saigon Jazz Club",
+      "description": "Cộng đồng jazz tại TP.HCM.",
+      "verified": false
+    },
+    "featured": false,
+    "status": "PUBLISHED",
+    "tiers": [
+      {
+        "name": "GA",
+        "description": "Ghế tự do",
+        "price": 300000,
+        "maxPerOrder": 6,
+        "quantity": 20
+      }
+    ]
+  },
+  {
+    "slug": "sunrise-countdown-2027",
+    "name": "Sunrise Countdown 2027",
+    "category": "music",
+    "startsAt": "2026-12-31T20:00:00+07:00",
+    "endsAt": "2027-01-01T00:30:00+07:00",
+    "venue": {
+      "name": "Quảng trường Đông Kinh Nghĩa Thục",
+      "city": "Hà Nội",
+      "address": "Hoàn Kiếm, Hà Nội"
+    },
+    "coverImageUrl": null,
+    "coverImageAlt": null,
+    "tagline": "Đêm đếm ngược chào năm mới (bản nháp).",
+    "description": [
+      "Bản nháp: nội dung chương trình đang được hoàn thiện."
+    ],
+    "schedule": [],
+    "organizer": {
+      "name": "Sunrise Live",
+      "description": "Đơn vị tổ chức các tour diễn quốc tế tại Việt Nam từ 2015.",
+      "verified": true
+    },
+    "featured": false,
+    "status": "DRAFT",
+    "tiers": [
+      {
+        "name": "GA",
+        "description": "Khu vực đứng",
+        "price": 0,
+        "maxPerOrder": 6,
+        "quantity": 5000
+      }
+    ]
+  }
+]

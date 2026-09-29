@@ -31,3 +31,9 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Secrets ###
+.env
+
+### Ảnh upload lưu local (app.storage.local-dir) ###
+uploads/

@@ -1,0 +1,13 @@
+# Profile test (mọi test dùng @ActiveProfiles("test")).
+# Cổng thanh toán ở đây là MockPaymentGateway + MockGatewayController trong src/test/java/com/example/demo/support,
+# PayOsPaymentGateway tắt vì nó mang @Profile("!test"). Không test nào gọi PayOS thật.
+app:
+  payment:
+    mock-checkout-url: http://localhost:3000/mock-gateway/checkout
+    mock-secret: mock-secret          # HMAC-SHA256 ký webhook giả lập, header X-Mock-Signature
+  payos:
+    # Giá trị giả: application.yaml khai ${PAYOS_CLIENT_ID} không có default, override ở đây để test
+    # không cần .env. Bean PayOS không được tạo ở profile test nên các key này không đi đâu cả.
+    client-id: test-client-id
+    api-key: test-api-key
+    checksum-key: test-checksum-key

@@ -1,0 +1,21 @@
+# PostgreSQL cho dev. Compose tự đọc .env cùng thư mục để thay ${DB_USERNAME}, ${DB_PASSWORD}.
+# Nếu máy đã có Postgres chạy sẵn ở 5432 thì không cần service này.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: event-application-db   # phải khớp tên DB cuối DB_URL trong .env
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d event-application-db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

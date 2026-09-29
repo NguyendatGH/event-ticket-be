@@ -1,3 +1,96 @@
 spring:
   application:
-    name: be
+    name: ticketing
+  profiles:
+    default: dev         
+  config:
+    import: optional:file:.env[.properties]
+
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+
+  jpa:
+    hibernate:
+      ddl-auto: validate     
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+    show-sql: false
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: false
+
+  servlet:
+    multipart:
+      max-file-size: 5MB       
+      max-request-size: 6MB
+
+app:
+  payos:
+    client-id: ${PAYOS_CLIENT_ID}
+    api-key: ${PAYOS_API_KEY}
+    checksum-key: ${PAYOS_CHECKSUM_KEY}
+    webhook-url: ${PAYOS_WEBHOOK_URL:}
+    payout:
+      client-id: ${PAYOS_PAYOUT_CLIENT_ID:}
+      api-key: ${PAYOS_PAYOUT_API_KEY:}
+      checksum-key: ${PAYOS_PAYOUT_CHECKSUM_KEY:}
+      base-url: ${PAYOS_PAYOUT_BASE_URL:}
+  jwt:
+    secret: ${JWT_SECRET}       
+    access-token-ttl: 15m
+  auth:
+    refresh-token-ttl: 14d        # refresh token opaque, rotation mỗi lần POST /auth/refresh
+    reset-token-ttl: 30m          # token đặt lại mật khẩu, dùng một lần
+    reset-password-url: http://localhost:3000/auth/reset-password   # link gửi cho user, app thêm ?token=
+    google:
+      # OAuth Client ID (loại "Web application") tạo ở Google Cloud Console. Bỏ trống = tắt đăng nhập Google.
+      # Không cần client secret: BE chỉ verify id_token FE gửi lên, không tự đổi code lấy token.
+      client-id: ${GOOGLE_CLIENT_ID:}
+  storage:
+    local-dir: uploads            # không có CLOUDINARY_URL: lưu ảnh ở đây, phục vụ GET /uploads/**
+    public-base-url: ""           # rỗng → URL tương đối /uploads/..., FE proxy /uploads
+    cloudinary-url: ${CLOUDINARY_URL:}   # cloudinary://<api_key>:<api_secret>@<cloud_name> → upload lên Cloudinary thay vì disk
+    # Hoặc điền rời đúng 3 ô Console Cloudinary hiển thị (chỉ dùng khi CLOUDINARY_URL bỏ trống).
+    cloudinary-cloud-name: ${CLOUDINARY_CLOUD_NAME:}
+    cloudinary-api-key: ${CLOUDINARY_API_KEY:}
+    cloudinary-api-secret: ${CLOUDINARY_API_SECRET:}
+  seed:
+    on-startup: false            
+  checkout:
+    order-ttl: 15m               
+    fee: ${CHECKOUT_FEE:12000} 
+  payment:
+    return-url: http://localhost:3000/checkout/return    
+    cancel-url: http://localhost:3000/checkout/cancel
+  refund:
+    fee-percent: ${REFUND_FEE_PERCENT:0}  
+    payout-enabled: ${REFUND_PAYOUT_ENABLED:true}  
+    processing-timeout: 30m                
+    awaiting-funds-timeout: 24h         
+    poll-interval: PT10S               
+    queue-interval: PT60S
+    recovery-interval: PT60S
+    merchant-bin: ${REFUND_MERCHANT_BIN:}
+    merchant-account: ${REFUND_MERCHANT_ACCOUNT:}
+  cors:
+    allowed-origins: http://localhost:3000  
+
+  logging:
+    pattern:
+      console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} [%X{source}][%X{provider}][orderCode=%X{orderCode}] [%level] %logger{36} : %msg%n"
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
