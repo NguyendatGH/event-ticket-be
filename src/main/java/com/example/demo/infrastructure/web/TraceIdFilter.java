@@ -15,9 +15,8 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
- * Gán trace_id cho mọi request (spec-plan §5 Tracing): nhận X-Request-Id từ client nếu có,
- * không thì sinh UUID; đưa vào MDC để mọi dòng log có [trace_id=...] và trả lại trong header.
- * Chạy trước Spring Security nên body 401/403 cũng có traceId.
+ * trace_id cho mọi request: lấy X-Request-Id của client hoặc sinh UUID, đưa vào MDC (LogPrefixConverter in ra)
+ * và trả lại trong header. Chạy trước Spring Security nên body 401/403 cũng có traceId.
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)

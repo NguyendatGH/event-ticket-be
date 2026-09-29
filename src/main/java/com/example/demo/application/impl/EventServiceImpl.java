@@ -38,16 +38,9 @@ import static com.example.demo.application.support.Texts.likePattern;
 import static com.example.demo.application.support.Texts.parseUuid;
 
 /**
- * API đọc sự kiện công khai (ui-api-contract §4.3), controller: EventController.
- * "Liệt kê" = status PUBLISHED/UPCOMING và (trừ khi includePast) chưa qua {@code coalesce(ends_at, starts_at)}.
- * DRAFT không xem được (404).
- * <p>
- * Cách đọc danh sách, 2 bước:
- * <ol>
- *   <li>Lọc + sắp xếp + phân trang bằng SQL (JdbcClient), chỉ lấy ra danh sách id. Lọc theo jsonb venue, giá thấp nhất,
- *       số vé đã bán... viết bằng SQL dễ hơn nhiều so với JPA.</li>
- *   <li>{@link #summaries} nạp entity theo lô cho các id đó: 4 query cho cả trang, không bị N+1.</li>
- * </ol>
+ * API đọc sự kiện công khai (EventController). "Liệt kê" = PUBLISHED/UPCOMING và chưa qua
+ * {@code coalesce(ends_at, starts_at)} trừ khi includePast; DRAFT → 404.
+ * Đọc danh sách 2 bước: SQL lọc/sắp/phân trang chỉ lấy id, rồi {@link #summaries} nạp theo lô (4 query, không N+1).
  */
 @Service
 @Transactional(readOnly = true)
@@ -73,7 +66,6 @@ public class EventServiceImpl implements EventService {
         this.jdbc = jdbc;
     }
 
-    /** GET /events */
     @Override
     public PageResponse<EventResponse> list(Filter f, String sort, int page, int size) {
         SqlWhere w = listed(f.includePast());
@@ -99,13 +91,11 @@ public class EventServiceImpl implements EventService {
         return page(w, orderBy(blankToNull(sort)), page, size);
     }
 
-    /** GET /events/featured */
     @Override
     public List<EventResponse> featured() {
         return summaries(ids(listed(false).add("e.featured"), BY_DATE, FEATURED_LIMIT, 0));
     }
 
-    /** GET /events/upcoming */
     @Override
     public List<EventResponse> upcoming(int limit) {
         SqlWhere w = listed(false).add("e.starts_at >= now()");
@@ -192,8 +182,6 @@ public class EventServiceImpl implements EventService {
                 .orElseThrow(() -> DomainException.notFound("EVENT_NOT_FOUND", "Không tìm thấy sự kiện " + idOrSlug));
     }
 
-    /* ---------- bước 1: truy vấn id bằng SQL ---------- */
-
     /** Bảng chung cho mọi query: p = giá thấp nhất mỗi sự kiện (lọc/sắp theo giá), o = BTC (tìm theo tên, lọc theo slug). */
     private static final String FROM = """
              from events e
@@ -268,8 +256,6 @@ public class EventServiceImpl implements EventService {
     private static Timestamp startOfDay(LocalDate day) {
         return Timestamp.from(day.atStartOfDay(VietnamTime.ZONE).toInstant());
     }
-
-    /* ---------- bước 2: nạp theo lô ---------- */
 
     /** Bốn query cho cả danh sách thay vì N+1: events theo id, tiers theo event, inventory theo tier, organizers theo id. */
     private List<EventResponse> summaries(List<UUID> ids) {

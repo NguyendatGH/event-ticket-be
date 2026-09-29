@@ -4,6 +4,7 @@ import com.example.demo.application.dto.CreateRefundRequest;
 import com.example.demo.application.dto.RefundResponse;
 import com.example.demo.application.dto.ResolveRefundRequest;
 import com.example.demo.domain.common.DomainException;
+import com.example.demo.domain.common.LogContext;
 import com.example.demo.domain.event.Event;
 import com.example.demo.domain.idempotency.IdempotencyScope;
 import com.example.demo.domain.order.Order;
@@ -50,9 +51,8 @@ import static com.example.demo.domain.payment.WebhookProcessingResult.DUPLICATE;
 import static com.example.demo.domain.payment.WebhookProcessingResult.IGNORED;
 
 /**
- * Mọi nguồn (user, admin, job) tạo refund đều qua {@link #create}; mọi lần gửi provider đều qua {@link #submit};
- * mọi kết quả đều qua {@link RefundResultHandler}. Transaction mở bằng TransactionTemplate như CheckoutService
- * vì các bước gọi nhau trong cùng bean và CÓ GỌI PROVIDER Ở GIỮA (không được gọi ra ngoài trong transaction).
+ * Mọi nguồn tạo refund qua {@link #create}, mọi lần gửi provider qua {@link #submit}, mọi kết quả qua {@link RefundResultHandler}.
+ * Dùng TransactionTemplate như CheckoutService vì các bước gọi nhau trong cùng bean và CÓ GỌI PROVIDER Ở GIỮA.
  */
 @Service
 public class RefundService {
@@ -110,8 +110,6 @@ public class RefundService {
         this.merchantAccount = merchantAccount;
     }
 
-    /* ======================= tạo refund ======================= */
-
     /**
      * POST /orders/{orderId}/refunds. Cùng Idempotency-Key + cùng body -> trả lại đúng refund cũ, không gọi provider lần hai.
      * {@code actorId} = user đang gọi; phải là chủ đơn, nếu không 404.
@@ -120,9 +118,12 @@ public class RefundService {
                                  RefundInitiator initiator) {
         return idempotency.execute(IdempotencyScope.REFUND, idempotencyKey,
                 Map.of("orderId", orderId, "actorId", actorId, "body", req), RefundResponse.class, () -> {
-                    UUID refundId = tx.execute(s -> open(actorId, orderId, req, initiator));   // TX1
-                    submit(refundId);                                                  // gọi provider NGOÀI transaction
-                    return get(refundId);
+                    try (LogContext.Scope ignored = LogContext.of(gateway.provider().name())) {
+                        UUID refundId = tx.execute(s -> open(actorId, orderId, req, initiator));   // TX1
+                        LogContext.refundId(refundId);
+                        submit(refundId);                                              // gọi provider NGOÀI transaction
+                        return get(refundId);
+                    }
                 });
     }
 
@@ -131,6 +132,7 @@ public class RefundService {
         Order order = orders.findWithLockById(orderId)
                 .orElseThrow(() -> DomainException.notFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng"));
         order.requireOwner(actorId);   // kiểm ngay sau khi khóa: hoàn tiền là tiền RA, không dựa vào orderId khó đoán
+        LogContext.orderCode(order.getOrderCode());
         Event event = events.findById(order.getEventId())
                 .orElseThrow(() -> DomainException.notFound("EVENT_NOT_FOUND", "Không tìm thấy sự kiện của đơn"));
         Payment payment = payments.findFirstByOrderIdOrderByCreatedAtDesc(orderId).filter(Payment::isPaid)
@@ -157,7 +159,7 @@ public class RefundService {
                     "bin phải là mã BIN Napas 6 số; lấy danh sách ở GET /api/v1/config");
         }
         if (isMerchantAccount(bin, account)) {
-            // Tiền chạy vòng về chính tài khoản thu: chặn ngay, đừng để thành lệnh chi (refund-mvp SPEC edge 15)
+            // Tiền chạy vòng về chính tài khoản thu: chặn ngay, đừng để thành lệnh chi
             throw DomainException.badRequest("DESTINATION_IS_MERCHANT", "Tài khoản nhận không được là tài khoản thu của hệ thống");
         }
 
@@ -176,8 +178,6 @@ public class RefundService {
         if (merchantBin == null || merchantBin.isBlank() || merchantAccount == null || merchantAccount.isBlank()) return false;
         return merchantBin.trim().equals(bin) && merchantAccount.trim().equals(account);
     }
-
-    /* ======================= gửi provider ======================= */
 
     /**
      * Gửi lệnh chi cho refund REQUESTED/AWAITING_FUNDS. Job cũng gọi. Gọi lặp an toàn:
@@ -274,8 +274,6 @@ public class RefundService {
         }
     }
 
-    /* ======================= đọc ======================= */
-
     @Transactional(readOnly = true)
     public RefundResponse get(UUID refundId) {
         return RefundResponse.from(refunds.findById(refundId)
@@ -314,8 +312,6 @@ public class RefundService {
         return refunds.findAllByStatusInOrderByCreatedAtDesc(statuses).stream().map(RefundResponse::from).toList();
     }
 
-    /* ======================= webhook kết quả refund ======================= */
-
     /**
      * POST /webhooks/{provider}/refund. Sai chữ ký -> 401 (vẫn ghi sổ). Trùng -> DUPLICATE nhờ unique (provider, event_id).
      * PayOS không có webhook lệnh chi nên đường này chỉ test double dùng; với PayOS thì RefundPollJob là đường chính.
@@ -324,6 +320,12 @@ public class RefundService {
         if (gateway.provider() != provider) {
             throw DomainException.notFound("PROVIDER_INACTIVE", "Provider " + provider + " không hoạt động ở profile này");
         }
+        try (LogContext.Scope ignored = LogContext.of(provider.name())) {
+            return applyRefundWebhook(provider, rawBody, headers);
+        }
+    }
+
+    private WebhookProcessingResult applyRefundWebhook(PaymentProvider provider, String rawBody, Map<String, String> headers) {
         RefundEvent e;
         try {
             e = gateway.verifyAndParseRefund(rawBody, headers);
@@ -346,6 +348,7 @@ public class RefundService {
             log.warn("Webhook refund cho {} / {} không khớp refund nào: bỏ qua", e.providerRefundId(), e.referenceId());
             result = IGNORED;
         } else {
+            LogContext.refundId(refund.getId());
             result = results.apply(refund.getId(),
                     new RefundStatusResult(e.status(), e.providerRefundId(), e.failureCode(), e.failureReason(), Instant.now()), false);
             audit.record(refund.getOrderId(), "INBOUND", "webhook:refund", null, e.rawPayload(), 200, 0);
@@ -356,41 +359,44 @@ public class RefundService {
         return result;
     }
 
-    /* ======================= job ======================= */
-
     /**
-     * RefundPollJob: hỏi provider các refund PROCESSING. Quá {@code processingTimeout} mà provider VẪN nói đang xử lý
-     * thì sang MANUAL_REVIEW, KHÔNG phải FAILED — FAILED sẽ mời admin bấm RETRY trong khi lệnh cũ còn có thể thành công,
-     * tức chi tiền hai lần (refund-mvp: payout_pending_too_long).
+     * RefundPollJob: hỏi provider các refund PROCESSING. Quá {@code processingTimeout} mà vẫn đang xử lý thì
+     * MANUAL_REVIEW chứ KHÔNG phải FAILED — FAILED mời admin bấm RETRY trong khi lệnh cũ còn có thể thành công, tức chi hai lần.
      */
     public void pollProcessing() {
         for (Refund r : refunds.findAllByStatusOrderByCreatedAt(RefundStatus.PROCESSING)) {
             if (r.getProvider() != gateway.provider() || r.getProviderRefundId() == null) continue;
-            long t0 = System.currentTimeMillis();
-            RefundStatusResult status;
-            try {
-                status = gateway.getRefundStatus(r.getProviderRefundId());
-            } catch (RuntimeException ex) {
-                log.warn("Hỏi trạng thái lệnh chi {} thất bại: {}", r.getProviderRefundId(), ex.toString());
-                audit.record(r.getOrderId(), "OUTBOUND", "getRefundStatus", Map.of("providerRefundId", r.getProviderRefundId()),
-                        Map.of("error", String.valueOf(ex.getMessage())), null, System.currentTimeMillis() - t0);
-                continue;
+            try (LogContext.Scope ignored = LogContext.refund(r.getProvider().name(), r.getId())) {
+                poll(r);
             }
-            audit.record(r.getOrderId(), "OUTBOUND", "getRefundStatus", Map.of("providerRefundId", r.getProviderRefundId()),
-                    status, 200, System.currentTimeMillis() - t0);
-            if (status.inFlight()) {
-                boolean tooLong = r.getSubmittedAt() != null && r.getSubmittedAt().plus(processingTimeout).isBefore(Instant.now());
-                tx.executeWithoutResult(s -> refunds.findWithLockById(r.getId()).ifPresent(x -> {
-                    x.polled();
-                    if (tooLong && x.getStatus() == RefundStatus.PROCESSING) {
-                        x.manualReview("PROCESSING_TIMEOUT", "Provider chưa chốt sau " + processingTimeout
-                                + "; lệnh có thể vẫn đang bay, KHÔNG gửi lại, tra dashboard trước");
-                    }
-                }));
-                continue;
-            }
-            results.apply(r.getId(), status, false);
         }
+    }
+
+    private void poll(Refund r) {
+        long t0 = System.currentTimeMillis();
+        RefundStatusResult status;
+        try {
+            status = gateway.getRefundStatus(r.getProviderRefundId());
+        } catch (RuntimeException ex) {
+            log.warn("Hỏi trạng thái lệnh chi {} thất bại: {}", r.getProviderRefundId(), ex.toString());
+            audit.record(r.getOrderId(), "OUTBOUND", "getRefundStatus", Map.of("providerRefundId", r.getProviderRefundId()),
+                    Map.of("error", String.valueOf(ex.getMessage())), null, System.currentTimeMillis() - t0);
+            return;
+        }
+        audit.record(r.getOrderId(), "OUTBOUND", "getRefundStatus", Map.of("providerRefundId", r.getProviderRefundId()),
+                status, 200, System.currentTimeMillis() - t0);
+        if (status.inFlight()) {
+            boolean tooLong = r.getSubmittedAt() != null && r.getSubmittedAt().plus(processingTimeout).isBefore(Instant.now());
+            tx.executeWithoutResult(s -> refunds.findWithLockById(r.getId()).ifPresent(x -> {
+                x.polled();
+                if (tooLong && x.getStatus() == RefundStatus.PROCESSING) {
+                    x.manualReview("PROCESSING_TIMEOUT", "Provider chưa chốt sau " + processingTimeout
+                            + "; lệnh có thể vẫn đang bay, KHÔNG gửi lại, tra dashboard trước");
+                }
+            }));
+            return;
+        }
+        results.apply(r.getId(), status, false);
     }
 
     /** RefundQueueJob: ví đủ thì gửi AWAITING_FUNDS theo thứ tự vào hàng; dừng ở refund đầu tiên không đủ (FIFO, không chen). */
@@ -405,32 +411,35 @@ public class RefundService {
                 continue;
             }
             if (r.getAmount() > available) break;
-            submit(r.getId());
+            try (LogContext.Scope ignored = LogContext.refund(r.getProvider().name(), r.getId())) {
+                submit(r.getId());
+            }
             available -= r.getAmount();
         }
     }
 
     /**
-     * RefundRecoveryJob: REQUESTED kẹt.
-     * <ul>
-     *   <li>Đã có key và quá 1 phút không kết quả: tra provider theo key; có -> PROCESSING; không -> gửi lại CÙNG key.</li>
-     *   <li>Chưa từng gửi (kill switch tắt, hoặc chết giữa TX1 và submit): gửi lần đầu.</li>
-     * </ul>
+     * RefundRecoveryJob: REQUESTED kẹt. Có key và quá 1 phút không kết quả thì tra provider theo key
+     * (có → PROCESSING, không → gửi lại CÙNG key); chưa từng gửi thì gửi lần đầu.
      */
     public void recoverStuck() {
         Instant cutoff = Instant.now().minus(STUCK_AFTER);
         for (Refund r : refunds.findAllByStatusAndSubmittedAtBefore(RefundStatus.REQUESTED, cutoff)) {
             if (r.getProvider() != gateway.provider() || r.getIdempotencyKey() == null) continue;
-            if (!adoptByReference(r.getId(), r.getIdempotencyKey())) {
-                log.info("Refund {} không có ở provider, gửi lại cùng key {}", r.getId(), r.getIdempotencyKey());
-                submit(r.getId());                                           // beginAttempt() giữ nguyên key
+            try (LogContext.Scope ignored = LogContext.refund(r.getProvider().name(), r.getId())) {
+                if (!adoptByReference(r.getId(), r.getIdempotencyKey())) {
+                    log.info("Refund {} không có ở provider, gửi lại cùng key {}", r.getId(), r.getIdempotencyKey());
+                    submit(r.getId());                                       // beginAttempt() giữ nguyên key
+                }
             }
         }
         refunds.findAllByStatusAndSubmittedAtIsNullAndCreatedAtBefore(RefundStatus.REQUESTED, cutoff)
-                .forEach(r -> submit(r.getId()));
+                .forEach(r -> {
+                    try (LogContext.Scope ignored = LogContext.refund(r.getProvider().name(), r.getId())) {
+                        submit(r.getId());
+                    }
+                });
     }
-
-    /* ======================= admin ======================= */
 
     /** Chốt refund MANUAL_REVIEW. SUCCEEDED/FAILED đi qua cùng RefundResultHandler như provider; RETRY về REQUESTED rồi gửi lại. */
     public RefundResponse resolve(UUID refundId, ResolveRefundRequest req) {
@@ -440,7 +449,13 @@ public class RefundService {
             throw DomainException.conflict("REFUND_NOT_IN_REVIEW",
                     "Chỉ chốt được refund đang MANUAL_REVIEW (hiện tại: " + r.getStatus() + ")");
         }
-        log.info("Admin resolve refund {}: {} ({})", refundId, req.outcome(), req.note());
+        try (LogContext.Scope ignored = LogContext.refund(r.getProvider().name(), refundId)) {
+            log.info("Admin resolve refund {}: {} ({})", refundId, req.outcome(), req.note());
+            return applyResolve(r, refundId, req);
+        }
+    }
+
+    private RefundResponse applyResolve(Refund r, UUID refundId, ResolveRefundRequest req) {
         switch (req.outcome()) {
             case SUCCEEDED -> results.apply(refundId, new RefundStatusResult(RefundStatusResult.Status.SUCCEEDED,
                     r.getProviderRefundId(), null, "admin: " + req.note(), Instant.now()), true);

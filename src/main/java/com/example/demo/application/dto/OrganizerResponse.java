@@ -7,8 +7,7 @@ import java.util.UUID;
 
 /**
  * Hồ sơ BTC, dùng chung cho trang public và trang quản lý. eventsCount = số sự kiện PUBLISHED/UPCOMING.
- * imageUrl = ảnh để hiển thị avatar: logo → ảnh bìa BTC → ảnh bìa sự kiện sắp diễn ra gần nhất của BTC
- * (nhiều BTC chưa upload logo; FE không phải tự đoán). null khi không có ảnh nào.
+ * imageUrl lấy theo thứ tự logo → ảnh bìa BTC → ảnh bìa sự kiện gần nhất (nhiều BTC chưa có logo), null nếu không có.
  */
 public record OrganizerResponse(
         UUID id, String slug, String name, String description, String logoUrl, String coverUrl, String imageUrl,

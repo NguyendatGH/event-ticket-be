@@ -3,30 +3,26 @@ package com.example.demo.infrastructure.logging;
 import ch.qos.logback.classic.pattern.ClassicConverter;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import com.example.demo.domain.common.LogContext;
+import com.example.demo.infrastructure.web.TraceIdFilter;
 
 import java.util.Map;
 
-/**
- * In tiền tố ngữ cảnh từ MDC: {@code [BACKEND][PAYOS][orderCode=ORD-...] }. Đăng ký làm conversion word
- * {@code %logPrefix} trong logback-spring.xml, đặt ngay trước {@code %maskedMsg}.
- *
- * <p>Không set MDC thì trả về chuỗi rỗng, nên log thường (startup, SQL, ...) không bị thêm {@code [][]}.
- * Đọc qua {@link ILoggingEvent#getMDCPropertyMap()} chứ không đọc thẳng MDC để vẫn đúng khi dùng async appender.
- */
+/** {@code %logPrefix}: dựng {@code [BACKEND][PAYOS][orderCode=...][trace=...] } từ MDC, thiếu key nào bỏ đoạn đó. */
 public class LogPrefixConverter extends ClassicConverter {
 
     @Override
     public String convert(ILoggingEvent event) {
         Map<String, String> mdc = event.getMDCPropertyMap();
-        String source = mdc.get(LogContext.SOURCE);
-        String provider = mdc.get(LogContext.PROVIDER);
-        String orderCode = mdc.get(LogContext.ORDER_CODE);
-        if (source == null && provider == null && orderCode == null) return "";
+        StringBuilder sb = new StringBuilder(64);
+        append(sb, "", mdc.get(LogContext.SOURCE));
+        append(sb, "", mdc.get(LogContext.PROVIDER));
+        append(sb, "orderCode=", mdc.get(LogContext.ORDER_CODE));
+        append(sb, "refundId=", mdc.get(LogContext.REFUND_ID));
+        append(sb, "trace=", mdc.get(TraceIdFilter.MDC_KEY));
+        return sb.isEmpty() ? "" : sb.append(' ').toString();
+    }
 
-        StringBuilder sb = new StringBuilder(48);
-        if (source != null) sb.append('[').append(source).append(']');
-        if (provider != null) sb.append('[').append(provider).append(']');
-        if (orderCode != null) sb.append("[orderCode=").append(orderCode).append(']');
-        return sb.append(' ').toString();
+    private static void append(StringBuilder sb, String label, String value) {
+        if (value != null) sb.append('[').append(label).append(value).append(']');
     }
 }

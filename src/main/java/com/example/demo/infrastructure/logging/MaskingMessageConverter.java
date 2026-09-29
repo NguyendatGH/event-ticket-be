@@ -6,7 +6,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import java.util.regex.Pattern;
 
 /**
- * Che dữ liệu nhạy cảm trong message log (spec-plan §5 Masking). Đăng ký làm conversion word
+ * Che dữ liệu nhạy cảm trong message log. Đăng ký làm conversion word
  * {@code %maskedMsg} trong logback-spring.xml thay cho {@code %m}. Chỉ che message, không che stack trace.
  */
 public class MaskingMessageConverter extends MessageConverter {

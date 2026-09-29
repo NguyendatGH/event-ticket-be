@@ -28,12 +28,9 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
- * Kênh CHI của PayOS (payout), dùng cho refund. Tách khỏi {@link PayOsPaymentGateway} vì credential khác hẳn
- * kênh thu ({@code app.payos.payout.*}) và vòng đời khác: client dựng lazy nên app vẫn khởi động được khi
- * chưa cấu hình kênh chi — chỉ lần tạo refund đầu tiên mới báo lỗi.
- *
- * <p>Điều kiện để chi được tiền thật (ngoài code): bật kênh chi hộ trên dashboard, liên kết ví Bao Kim,
- * whitelist IP server (localhost bị từ chối), nạp tiền ví.
+ * Kênh CHI của PayOS (payout) cho refund. Tách khỏi {@link PayOsPaymentGateway} vì credential khác
+ * ({@code app.payos.payout.*}) và dựng lazy — app vẫn khởi động khi chưa cấu hình, chỉ refund đầu tiên mới báo lỗi.
+ * Chi được tiền thật còn cần (ngoài code): bật chi hộ trên dashboard, liên kết ví Bao Kim, whitelist IP server, nạp ví.
  */
 @Component
 @Profile("!test")

@@ -85,10 +85,6 @@ public class Order {
     @BatchSize(size = 50)   
     private List<OrderItem> items = new ArrayList<>();
 
-    // public static Order create(UUID eventId, List<OrderItem> items, String customerName, String customerEmail,
-    //                            String customerPhone, long fee, Instant expiresAt, String idempotencyKey) {
-    //     return create(eventId, items, customerName, customerEmail, customerPhone, fee, expiresAt, idempotencyKey, null);
-    // }
 
     public static Order create(UUID eventId, List<OrderItem> items, String customerName, String customerEmail,
                                String customerPhone, long fee, Instant expiresAt, String idempotencyKey, UUID userId) {

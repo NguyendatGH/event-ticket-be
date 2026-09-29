@@ -14,7 +14,6 @@ import org.hibernate.annotations.UpdateTimestamp;
 import java.time.Instant;
 import java.util.UUID;
 
-//Hồ sơ ban tổ chức.
 @Entity
 @Table(name = "organizers")
 @Getter

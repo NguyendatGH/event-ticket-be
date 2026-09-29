@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * spec-plan 7.3: mỗi phút, order PENDING_PAYMENT quá expires_at → hỏi provider một lần;
+ * Mỗi phút, order PENDING_PAYMENT quá expires_at → hỏi provider một lần;
  * chưa trả thì EXPIRED + trả kho + hủy link; đã trả thì xử lý như webhook.
  */
 @Component

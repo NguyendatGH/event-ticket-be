@@ -11,9 +11,8 @@ import org.springframework.stereotype.Component;
 import java.util.UUID;
 
 /**
- * Kiểm tra quyền sở hữu cho các API /organizer/events (dùng chung bởi OrganizerEventQueries và OrganizerEventService).
- * SecurityConfig chỉ chặn theo role; service phải tự kiểm tra "sự kiện này có phải của BTC đang đăng nhập không".
- * Sự kiện của BTC khác trả 404 (không phải 403) để không lộ là id đó có tồn tại.
+ * Kiểm quyền sở hữu cho /organizer/events. SecurityConfig chỉ chặn theo role nên service phải tự hỏi
+ * "sự kiện này có phải của BTC đang đăng nhập không". Của BTC khác → 404 (không phải 403) để không lộ id có tồn tại.
  */
 @Component
 public class OrganizerAccessImpl implements OrganizerAccess {

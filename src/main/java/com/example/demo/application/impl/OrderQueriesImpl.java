@@ -72,9 +72,8 @@ public class OrderQueriesImpl implements OrderQueries {
     }
 
     /**
-     * Đơn của user, mới nhất trước. Mỗi trang cố định vài query (items, vé, payment, event theo lô).
-     * {@code status} tùy chọn: một hoặc nhiều OrderStatus cách nhau dấu phẩy (vd "CANCELLED,EXPIRED");
-     * bỏ trống = mọi trạng thái (hành vi cũ).
+     * Đơn của user, mới nhất trước; mỗi trang cố định vài query (items, vé, payment, event theo lô).
+     * {@code status} tùy chọn: nhiều OrderStatus cách nhau dấu phẩy (vd "CANCELLED,EXPIRED"), bỏ trống = mọi trạng thái.
      */
     @Override
     @Transactional(readOnly = true)

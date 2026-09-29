@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 import java.util.UUID;
 
 /**
- * Ba việc nền của refund (refund-implementation-plan bước 5). Không ShedLock, một instance như OrderExpiryJob.
+ * Ba việc nền của refund. Không ShedLock, một instance như OrderExpiryJob.
  * Lỗi của một job không được làm chết job khác, nên mỗi lần chạy bọc try/catch riêng.
  */
 @Component

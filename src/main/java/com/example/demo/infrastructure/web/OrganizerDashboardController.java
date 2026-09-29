@@ -20,9 +20,9 @@ import java.time.LocalDate;
 import java.util.List;
 
 /**
- * /api/v1/organizer/dashboard: số liệu bán vé của BTC hiện tại, gọi DashboardService (quyền ORGANIZER/ADMIN do SecurityConfig chặn ở /api/v1/organizer/**).
+ * Số liệu bán vé của BTC hiện tại (quyền ORGANIZER/ADMIN do SecurityConfig chặn).
  * Tham số chung: from, to (YYYY-MM-DD, mặc định 30 ngày tới hôm nay, giờ VN), interval (day|week|month), eventId.
- * Tham số nhận dạng String và tự parse để lỗi trả 400 VALIDATION kèm errors theo field.
+ * Nhận dạng String rồi tự parse để lỗi trả 400 VALIDATION kèm errors theo field.
  */
 @RestController
 @RequestMapping("/api/v1/organizer/dashboard")

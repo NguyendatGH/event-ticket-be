@@ -107,28 +107,27 @@ public class CheckoutServiceImpl implements CheckoutService {
                 order.getItems().stream().map(i -> new CreatePaymentCommand.Item(i.getTierName(), i.getQuantity(), i.getUnitPrice())).toList(),
                 returnUrl + "?orderId=" + order.getId(), cancelUrl + "?orderId=" + order.getId(), order.getExpiresAt());
         long startedAt = System.currentTimeMillis();
-        PaymentLink link;
-        LogContext.set("BACKEND", gateway.provider().name(), String.valueOf(order.getOrderCode()));
-        try {
-            log.info("Sending create payment request");
-            link = gateway.createPaymentLink(command);
-            log.info("Payment link created: {}", link);
-            audit.record(order.getId(), "OUTBOUND", "createPaymentLink", command, link, 200, System.currentTimeMillis() - startedAt);
-            return tx.execute(s -> {
-                Payment payment = payments.save(Payment.pending(order.getId(), gateway.provider(), link, order.getTotalAmount()));
-                return OrderResponse.from(orders.findById(order.getId()).orElseThrow(), event, List.of(), payment);
-            });
-        } catch (RuntimeException ex) {
-            log.error("Payment link creation failed", ex);
-            audit.record(order.getId(), "OUTBOUND", "createPaymentLink", command,
-                    Map.of("error", String.valueOf(ex.getMessage())), null, System.currentTimeMillis() - startedAt);
-            tx.executeWithoutResult(s -> orders.findWithLockById(order.getId()).ifPresent(o -> {
-                o.cancel();
-                fulfilment.release(o);
-            }));
-            throw new DomainException(HttpStatus.BAD_GATEWAY, "PAYMENT_LINK_FAILED", "Cổng thanh toán không phản hồi, đơn đã hủy và trả vé. Thử lại sau.");
-        } finally {
-            LogContext.clear();
+        // catch nằm TRONG scope để log lỗi cũng có tiền tố
+        try (LogContext.Scope ignored = LogContext.order(gateway.provider().name(), order.getOrderCode())) {
+            try {
+                log.info("Sending create payment request");
+                PaymentLink link = gateway.createPaymentLink(command);
+                log.info("Payment link created: {}", link);
+                audit.record(order.getId(), "OUTBOUND", "createPaymentLink", command, link, 200, System.currentTimeMillis() - startedAt);
+                return tx.execute(s -> {
+                    Payment payment = payments.save(Payment.pending(order.getId(), gateway.provider(), link, order.getTotalAmount()));
+                    return OrderResponse.from(orders.findById(order.getId()).orElseThrow(), event, List.of(), payment);
+                });
+            } catch (RuntimeException ex) {
+                log.error("Payment link creation failed", ex);
+                audit.record(order.getId(), "OUTBOUND", "createPaymentLink", command,
+                        Map.of("error", String.valueOf(ex.getMessage())), null, System.currentTimeMillis() - startedAt);
+                tx.executeWithoutResult(s -> orders.findWithLockById(order.getId()).ifPresent(o -> {
+                    o.cancel();
+                    fulfilment.release(o);
+                }));
+                throw new DomainException(HttpStatus.BAD_GATEWAY, "PAYMENT_LINK_FAILED", "Cổng thanh toán không phản hồi, đơn đã hủy và trả vé. Thử lại sau.");
+            }
         }
     }
 

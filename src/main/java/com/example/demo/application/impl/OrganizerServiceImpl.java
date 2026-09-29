@@ -33,9 +33,8 @@ public class OrganizerServiceImpl implements OrganizerService {
     private static final int MAX_FEATURED = 24;
 
     /**
-     * Thứ tự hàng "Ban tổ chức nổi bật": đã xác minh trước, rồi nhiều sự kiện SẮP/ĐANG diễn ra hơn, rồi theo tên.
-     * Bỏ BTC không còn sự kiện nào chưa kết thúc (trang chủ chỉ giới thiệu BTC đang có cái để mua).
-     * Cột "listed" = mọi sự kiện PUBLISHED/UPCOMING (kể cả đã qua), cùng nghĩa eventsCount ở trang chi tiết BTC.
+     * "BTC nổi bật": xác minh trước, rồi nhiều sự kiện sắp/đang diễn ra hơn, rồi theo tên; bỏ BTC không còn sự kiện nào.
+     * Cột "listed" = mọi sự kiện PUBLISHED/UPCOMING kể cả đã qua, cùng nghĩa eventsCount ở trang chi tiết BTC.
      */
     private static final String FEATURED_SQL = """
             select o.id, count(*) as listed,

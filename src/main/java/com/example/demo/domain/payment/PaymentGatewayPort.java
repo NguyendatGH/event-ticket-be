@@ -4,8 +4,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Cổng ra cổng thanh toán (spec-plan mục 6). Adapter thật: infrastructure.gateway.payos (PayOS), luôn bật khi
- * chạy app. Test dùng MockPaymentGateway ở src/test/java/com/example/demo/support (@Profile("test")).
+ * Cổng ra cổng thanh toán. Adapter thật: infrastructure.gateway.payos; test dùng MockPaymentGateway.
  * Không gọi các method này bên trong DB transaction.
  */
 public interface PaymentGatewayPort {
@@ -25,8 +24,6 @@ public interface PaymentGatewayPort {
      * @throws InvalidWebhookSignatureException khi chữ ký sai
      */
     PaymentEvent verifyAndParse(String rawBody, Map<String, String> headers);
-
-    /* ---- Refund bằng lệnh chi (spec-plan/refund-code-plan.md mục 4.3) ---- */
 
     /**
      * Gửi lệnh hoàn. Provider phải idempotent theo {@code command.referenceId()}.

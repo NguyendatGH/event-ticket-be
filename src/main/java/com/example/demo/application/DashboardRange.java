@@ -14,7 +14,7 @@ import java.util.Locale;
 import java.util.UUID;
 
 /**
- * Tham số chung của dashboard (ui-api-contract §4.5): khoảng ngày [from, to] gồm cả hai đầu theo giờ VN,
+ * Tham số chung của dashboard: khoảng ngày [from, to] gồm cả hai đầu theo giờ VN,
  * bucket day|week|month và eventId tùy chọn. Tham số sai → 400 VALIDATION kèm {@code errors} theo field.
  */
 public record DashboardRange(LocalDate from, LocalDate to, Interval interval, UUID eventId) {

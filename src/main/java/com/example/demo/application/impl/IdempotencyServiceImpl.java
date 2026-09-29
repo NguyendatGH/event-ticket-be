@@ -30,7 +30,7 @@ public class IdempotencyServiceImpl implements IdempotencyService {
         if (key == null || key.isBlank()) {
             throw DomainException.badRequest("IDEMPOTENCY_KEY_REQUIRED", "Thiếu header Idempotency-Key");
         }
-        String hash = OpaqueTokens.sha256Hex(json.writeValueAsString(request));   // băm body để so "cùng request"
+        String hash = OpaqueTokens.sha256Hex(json.writeValueAsString(request));
         Optional<IdempotencyRecord> existing = records.findByScopeAndIdemKey(scope, key);
         if (existing.isPresent()) {
             if (!existing.get().getRequestHash().equals(hash)) {

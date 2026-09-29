@@ -10,12 +10,8 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * Không phải ví của mình. Chỉ là ba phép tính trên số dư ví chi của provider (refund-implementation-plan 1.9):
- * <pre>
- *   committed = refund đang REQUESTED/PROCESSING (tiền sắp đi hoặc đang đi)
- *   available = balance - committed             (được phép gửi lệnh mới không)
- *   liability = tổng giá vé ACTIVE               (tối đa có thể bị đòi hoàn)
- * </pre>
+ * Ba phép tính trên số dư ví chi của provider (không phải ví của mình):
+ * committed = refund REQUESTED/PROCESSING, available = balance − committed, liability = tổng giá vé ACTIVE.
  * AWAITING_FUNDS KHÔNG tính vào committed, nếu không hàng chờ tự chặn chính nó mãi mãi.
  */
 @Service

@@ -154,6 +154,28 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
+            <!-- ./mvnw flyway:migrate tạo schema mà KHÔNG cần boot app (app bắt buộc có key PayOS mới chạy được).
+                 Đọc DB_* từ môi trường: `set -a; . ./.env; set +a` trước khi gọi. Xem db/README.md. -->
+            <plugin>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-maven-plugin</artifactId>
+                <version>${flyway.version}</version>
+                <configuration>
+                    <url>${env.DB_URL}</url>
+                    <user>${env.DB_USERNAME}</user>
+                    <password>${env.DB_PASSWORD}</password>
+                    <locations>
+                        <location>filesystem:src/main/resources/db/migration</location>
+                    </locations>
+                </configuration>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.flywaydb</groupId>
+                        <artifactId>flyway-database-postgresql</artifactId>
+                        <version>${flyway.version}</version>
+                    </dependency>
+                </dependencies>
+            </plugin>
             <plugin>
                 <!-- Test luôn chạy với số mặc định, bất kể .env của máy dev đang đặt demo giá rẻ (CHECKOUT_FEE=0...).
                      System property ưu tiên hơn .env nên ghim ở đây là đủ. -->

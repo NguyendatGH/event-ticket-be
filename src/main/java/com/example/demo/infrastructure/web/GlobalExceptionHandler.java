@@ -25,14 +25,10 @@ import java.sql.SQLException;
 import java.util.Map;
 
 /**
- * Mọi lỗi trả về application/problem+json (RFC 9457) kèm hai trường mở rộng mà FE đọc
- * (fe/src/api/errors.js): {@code code} mã máy đọc và {@code traceId} để tra log.
- * Lỗi validation (và DomainException có withErrors) thêm {@code errors: [{field, message}]}.
- * Kế thừa ResponseEntityExceptionHandler để Boot tắt ProblemDetailsExceptionHandler mặc định
- * và các lỗi MVC chuẩn (400, 404, 405, 413, 415...) cũng đi qua {@link #createResponseEntity}.
- * 401/403 từ filter của Spring Security không tới đây, xem SecurityConfig. AccessDeniedException từ
- * {@code @PreAuthorize} cố ý KHÔNG bắt ở đây: để nó ra tới ExceptionTranslationFilter, chưa đăng nhập → 401,
- * đã đăng nhập → 403 FORBIDDEN, cả hai cùng body problem+json của SecurityConfig.
+ * Mọi lỗi ra problem+json (RFC 9457) kèm {@code code} và {@code traceId}; lỗi validation thêm {@code errors[]}.
+ * Kế thừa ResponseEntityExceptionHandler để lỗi MVC chuẩn cũng đi qua {@link #createResponseEntity}.
+ * 401/403 từ filter Spring Security không tới đây (xem SecurityConfig). AccessDeniedException từ {@code @PreAuthorize}
+ * cố ý KHÔNG bắt, để ExceptionTranslationFilter phân biệt chưa đăng nhập → 401 và đã đăng nhập → 403.
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {

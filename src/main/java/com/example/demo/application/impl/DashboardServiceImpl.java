@@ -25,11 +25,9 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Dashboard của BTC đang đăng nhập (ui-api-contract §4.5), controller: OrganizerDashboardController.
- * Chỉ đọc, viết SQL thẳng bằng JdbcClient vì toàn là phép gộp (sum/count/group by theo ngày) trên nhiều bảng.
- * Chỉ tính đơn {@code status = PAID} theo {@code paid_at} (giờ VN), doanh thu = subtotal_amount (không gồm phí).
- * GIỚI HẠN: tính trực tiếp mỗi request (có index orders.paid_at), đủ cho vài chục nghìn đơn/BTC;
- * nặng hơn thì chuyển sang bảng tổng hợp theo ngày, cập nhật khi đơn PAID.
+ * Dashboard của BTC đang đăng nhập. Chỉ đọc, SQL thẳng bằng JdbcClient vì toàn phép gộp trên nhiều bảng.
+ * Chỉ tính đơn PAID theo {@code paid_at} (giờ VN), doanh thu = subtotal_amount (không gồm phí).
+ * GIỚI HẠN: tính trực tiếp mỗi request, đủ vài chục nghìn đơn/BTC; nặng hơn thì làm bảng tổng hợp theo ngày.
  */
 @Service
 @Transactional(readOnly = true)
@@ -102,8 +100,6 @@ public class DashboardServiceImpl implements DashboardService {
                         rs.getLong("tickets"), rs.getLong("revenue")))
                 .list();
     }
-
-    /* ---------- truy vấn ---------- */
 
     /** User hiện tại phải có hồ sơ organizer (ADMIN không có → 404); eventId phải thuộc organizer đó. */
     private UUID organizerOf(UUID userId, DashboardRange range) {

@@ -26,10 +26,9 @@ import static com.example.demo.domain.payment.WebhookProcessingResult.IGNORED;
 import static com.example.demo.domain.payment.WebhookProcessingResult.PROCESSED;
 
 /**
- * Poll, webhook và admin resolve đều đổ vào đây — một cửa duy nhất chốt kết quả refund và hoàn kho.
- * Một transaction: khóa order -> khóa refund -> chuyển trạng thái có điều kiện. Kết quả đến lần thứ hai thấy
- * refund đã terminal thì IGNORED, nên kho không bao giờ được cộng hai lần dù webhook trùng, poll trùng
- * hay admin bấm hai lần.
+ * Một cửa duy nhất chốt kết quả refund và hoàn kho (poll, webhook, admin resolve đều đổ vào đây).
+ * Một transaction: khóa order → khóa refund → chuyển trạng thái có điều kiện. Lần thứ hai thấy refund đã terminal
+ * thì IGNORED, nên kho không bao giờ cộng hai lần dù webhook trùng, poll trùng hay admin bấm hai lần.
  */
 @Component
 public class RefundResultHandler {
@@ -102,7 +101,7 @@ public class RefundResultHandler {
                 log.warn("Refund {} {} ở provider: MANUAL_REVIEW", refundId, result.status());
             }
             case RECEIVED, PROCESSING -> {
-                return IGNORED;   // chưa có gì để chốt
+                return IGNORED;
             }
         }
         return PROCESSED;
@@ -110,7 +109,7 @@ public class RefundResultHandler {
 
     /**
      * Không bao giờ hoàn quá số tiền đã thu của đơn. Ném ra là rollback cả transaction — đúng ý: thà refund
-     * không chốt được còn hơn sổ sách sai. (Mượn từ refund-mvp/service/InvariantChecker.)
+     * không chốt được còn hơn sổ sách sai.
      */
     private void assertNotOverRefunded(Order order) {
         long paid = order.getPaidAmount();

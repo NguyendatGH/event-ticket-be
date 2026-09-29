@@ -1,30 +1,34 @@
 # Event Ticket API (be)
 
-Backend bán vé sự kiện: Spring Boot 4.1.1, Java 21, PostgreSQL, Flyway, JWT. Spec và plan ở `../../docs/spec-plan/`, schema ở `database-schema.md`.
+Backend bán vé sự kiện: Spring Boot 4.1.1, Java 21, PostgreSQL, Flyway, JWT.
+
+Sơ đồ ERD + state machine + luồng xử lý: [`docs/ERD.md`](docs/ERD.md). Dựng database: [`db/README.md`](db/README.md).
 
 ## Chạy
 
 ```bash
-cp .env.example .env            # điền DB_*, JWT_SECRET (openssl rand -hex 32)
+cp .env.example .env            # điền DB_*, JWT_SECRET (openssl rand -hex 32), PAYOS_*
 docker compose up -d            # Postgres 16 ở 5432, bỏ qua nếu máy đã có Postgres
-./mvnw spring-boot:run          # profile mặc định: dev; lần đầu Flyway tự tạo schema, KHÔNG tự seed
 
-# Seed dữ liệu dev (3 user + 12 event) bằng SQL, chạy lại bao nhiêu lần cũng được (idempotent):
 set -a; . ./.env; set +a
-PGPASSWORD="$DB_PASSWORD" psql -h localhost -U "$DB_USERNAME" -d event-application-db -v ON_ERROR_STOP=1 -f db/seed-dev.sql
+./mvnw flyway:migrate           # tạo schema, không cần boot app nên không cần key PayOS
+PGPASSWORD="$DB_PASSWORD" psql -h localhost -U "$DB_USERNAME" -d event-application-db \
+  -1 -v ON_ERROR_STOP=1 -f db/seed-dev.sql    # dữ liệu mẫu, idempotent
+
+./mvnw spring-boot:run          # profile mặc định: dev. CẦN đủ PAYOS_* trong .env mới khởi động được
 ```
 
 - Swagger: http://localhost:8080/swagger-ui.html (không có dấu `/` cuối)
 - Profile: `spring.profiles.default=dev` nên không truyền gì là `dev` (bật `/dev/**`).
-- Seed: `db/seed-dev.sql` là nguồn chính, sinh từ `src/main/resources/seed/events.json` (id cố định UUID v5, `ON CONFLICT DO NOTHING`). `DevDataSeeder` mặc định tắt (`app.seed.on-startup=false`); bật `true` nếu muốn seed tự động lúc boot khi bảng trống. `POST /dev/seed` vẫn xóa và seed lại từ JSON.
-- DB có bảng cũ nhưng chưa có `flyway_schema_history` (ví dụ từ thời còn `ddl-auto`) thì Flyway từ chối chạy: drop các bảng cũ hoặc trỏ `DB_URL` sang DB mới. Chạy prod: `./mvnw spring-boot:run -Dspring-boot.run.profiles=prod`.
+- Seed và các bước dựng DB: xem [`db/README.md`](db/README.md). `DevDataSeeder` mặc định tắt (`app.seed.on-startup=false`); bật `true` để seed tự động lúc boot khi bảng trống.
+- Chạy prod: `./mvnw spring-boot:run -Dspring-boot.run.profiles=prod`.
 - Schema do Flyway tạo từ `src/main/resources/db/migration/`, Hibernate chỉ `validate`.
 
-Tài khoản seed (`db/seed-dev.sql`), mật khẩu chung `password123`: `a@example.com`, `b@example.com` (CUSTOMER), `admin@example.com` (ADMIN).
+Tài khoản seed, mật khẩu chung `password123`: `a@example.com`, `b@example.com` (CUSTOMER), `admin@example.com` (ADMIN), `organizer@example.com` (ORGANIZER).
 
 ## API
 
-Base `/api/v1`, JSON, tiền là số nguyên VND, thời gian ISO-8601. Hợp đồng chi tiết cho FE: `../../docs/spec-plan/ui-api-contract.md`.
+Base `/api/v1`, JSON, tiền là số nguyên VND, thời gian ISO-8601. Hợp đồng chi tiết cho FE: `../context/docs/spec-plan/ui-api-contract.md`.
 
 | Nhóm | Endpoint | Ghi chú |
 |---|---|---|
@@ -140,7 +144,7 @@ Muốn chi tiền thật cần thêm trên dashboard PayOS: bật kênh chi hộ
 Config: `app.refund.*` trong `application.yaml` (`fee-percent` phí hủy, `payout-enabled` kill switch,
 `processing-timeout`, `awaiting-funds-timeout`, `merchant-bin`/`merchant-account` chặn hoàn vòng về tài khoản thu).
 
-**Hiểu và tự sửa được: `../../context/docs/spec-plan/huong-dan-refund.md`** — mô hình tư duy, thứ tự đọc code,
+**Hiểu và tự sửa được: `../context/docs/spec-plan/huong-dan-refund.md`** — mô hình tư duy, thứ tự đọc code,
 7 bước xây lại, và 5 cái bẫy làm mất tiền kèm chỗ code chặn nó.
 
 ## Lỗi
@@ -169,7 +173,7 @@ curl -si http://localhost:8080/api/v1/users -H 'X-Request-Id: demo-1' | grep -iE
 
 ## CORS và FE
 
-FE (`../../fe`, React + Vite) ở dev proxy `/api` sang `http://localhost:8080` (`vite.config.js`) nên cùng origin, không cần CORS. Khi FE chạy khác origin, đặt `app.cors.allowed-origins` (nhiều origin cách nhau bằng dấu phẩy) cho `/api/**`; header cho phép: `Authorization`, `Content-Type`, `Idempotency-Key`, `X-Request-Id`.
+FE (`../fe`, React + Vite) ở dev proxy `/api` sang `http://localhost:8080` (`vite.config.js`) nên cùng origin, không cần CORS. Khi FE chạy khác origin, đặt `app.cors.allowed-origins` (nhiều origin cách nhau bằng dấu phẩy) cho `/api/**`; header cho phép: `Authorization`, `Content-Type`, `Idempotency-Key`, `X-Request-Id`.
 
 ## Test
 

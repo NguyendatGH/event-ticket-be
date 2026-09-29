@@ -6,15 +6,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Mã BIN Napas của các ngân hàng Việt Nam, dùng làm đích cho lệnh chi (refund).
- *
- * <p>Vì sao cần kiểm: trường {@code counterAccountBankId} trong webhook thanh toán của PayOS
- * KHÔNG phải lúc nào cũng là BIN Napas 6 số. Nó có thể là mã CITAD liên ngân hàng 8 số
- * (ví dụ {@code 01201001}), hoặc rỗng khi khách trả bằng ví điện tử. API chi hộ từ chối cả hai.
- * Đoán BIN từ một mã khác là có ngày chuyển tiền cho người lạ, nên mã không đúng dạng thì coi như
- * KHÔNG BIẾT ngân hàng và bắt khách tự chọn.
- *
- * <p>Thứ tự trong map là thứ tự hiện ở dropdown: ngân hàng phổ biến lên trước.
+ * BIN Napas của ngân hàng VN, dùng làm đích lệnh chi. Phải kiểm vì {@code counterAccountBankId} trong webhook PayOS
+ * có khi là mã CITAD 8 số hoặc rỗng (khách trả bằng ví) — API chi hộ từ chối cả hai, mà đoán BIN là có ngày
+ * chuyển tiền cho người lạ. Sai dạng thì coi như KHÔNG BIẾT ngân hàng, bắt khách tự chọn.
+ * Thứ tự trong map = thứ tự dropdown.
  */
 public final class BankBins {
 

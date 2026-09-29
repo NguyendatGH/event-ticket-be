@@ -15,7 +15,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/** spec-plan mục 8: mỗi 5 phút đối chiếu đơn PENDING sắp hết hạn với provider, phòng webhook rớt. */
+/** Mỗi 5 phút đối chiếu đơn PENDING sắp hết hạn với provider, phòng webhook rớt. */
 @Component
 public class PaymentReconcileJob {
 

@@ -2,39 +2,61 @@ package com.example.demo.domain.common;
 
 import org.slf4j.MDC;
 
+import java.util.UUID;
+
 /**
- * Ngữ cảnh log của một luồng xử lý (checkout / webhook). Giá trị nằm trong MDC và được
- * {@code com.example.demo.infrastructure.logging.LogPrefixConverter} in ra đầu message dưới dạng
- * {@code [BACKEND][PAYOS][orderCode=ORD-...]}.
- *
- * <p>MDC là ThreadLocal: phải {@link #set} ở đầu luồng và {@link #clear} trong {@code finally},
- * nếu không giá trị sẽ dính lại trên thread của pool và log nhầm sang request khác.
+ * Ngữ cảnh log ở đầu message: {@code [BACKEND][PAYOS][orderCode=...]}. Mở bằng try-with-resources.
+ * Đóng scope trả MDC về giá trị TRƯỚC ĐÓ chứ không xóa trắng, nên scope lồng nhau không mất ngữ cảnh bên ngoài.
  */
 public final class LogContext {
 
     public static final String SOURCE = "source";
     public static final String PROVIDER = "provider";
     public static final String ORDER_CODE = "orderCode";
+    public static final String REFUND_ID = "refundId";
+
+    private static final String[] KEYS = {SOURCE, PROVIDER, ORDER_CODE, REFUND_ID};
 
     private LogContext() {
     }
 
-    /** orderCode có thể null khi chưa parse được payload (webhook lúc mới vào). */
-    public static void set(String source, String provider, String orderCode) {
-        put(SOURCE, source);
+    @FunctionalInterface
+    public interface Scope extends AutoCloseable {
+        @Override
+        void close();
+    }
+
+    public static Scope of(String provider) {
+        return open(provider, null, null);
+    }
+
+    public static Scope order(String provider, long orderCode) {
+        return open(provider, String.valueOf(orderCode), null);
+    }
+
+    public static Scope refund(String provider, UUID refundId) {
+        return open(provider, null, refundId.toString());
+    }
+
+    /** Bổ sung giá trị chỉ biết sau khi scope đã mở. */
+    public static void orderCode(long orderCode) {
+        put(ORDER_CODE, String.valueOf(orderCode));
+    }
+
+    public static void refundId(UUID refundId) {
+        put(REFUND_ID, refundId == null ? null : refundId.toString());
+    }
+
+    private static Scope open(String provider, String orderCode, String refundId) {
+        String[] previous = new String[KEYS.length];
+        for (int i = 0; i < KEYS.length; i++) previous[i] = MDC.get(KEYS[i]);
+        put(SOURCE, "BACKEND");
         put(PROVIDER, provider);
         put(ORDER_CODE, orderCode);
-    }
-
-    /** Bổ sung orderCode khi đã biết, giữ nguyên source/provider đã set trước đó. */
-    public static void orderCode(String orderCode) {
-        put(ORDER_CODE, orderCode);
-    }
-
-    public static void clear() {
-        MDC.remove(SOURCE);
-        MDC.remove(PROVIDER);
-        MDC.remove(ORDER_CODE);
+        put(REFUND_ID, refundId);
+        return () -> {
+            for (int i = 0; i < KEYS.length; i++) put(KEYS[i], previous[i]);
+        };
     }
 
     private static void put(String key, String value) {

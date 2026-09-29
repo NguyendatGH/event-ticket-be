@@ -23,9 +23,9 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * /api/v1: yêu cầu hoàn tiền theo vé. Trả 202 vì tiền đi bất đồng bộ — client đọc GET /refunds/{id} để biết kết quả.
- * PHẢI đăng nhập và phải là chủ đơn: hoàn tiền là tiền RA + hủy vé, không thể chỉ dựa vào orderId khó đoán
- * như endpoint chỉ đọc. Không phải chủ đơn -> 404 (không tiết lộ đơn có tồn tại).
+ * Yêu cầu hoàn tiền theo vé. Trả 202 vì tiền đi bất đồng bộ — client đọc GET /refunds/{id} để biết kết quả.
+ * Phải đăng nhập và là chủ đơn (tiền RA + hủy vé, không dựa vào orderId khó đoán như endpoint chỉ đọc);
+ * không phải chủ đơn → 404 để không lộ đơn có tồn tại.
  */
 @RestController
 @RequestMapping("/api/v1")

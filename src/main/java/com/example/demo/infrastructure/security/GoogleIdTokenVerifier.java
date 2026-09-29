@@ -16,18 +16,9 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 /**
- * Kiểm tra id_token mà Google trả về cho FE (nút "Đăng nhập với Google").
- *
- * <p>id_token bản chất là một JWT do Google ký bằng khóa riêng RS256. BE KHÔNG được tin phần payload
- * nếu chưa verify — ai cũng có thể tự bịa một chuỗi JWT chứa email người khác. Verify gồm 4 việc:
- * <ol>
- *   <li>Chữ ký: tải public key của Google ở {@link #JWKS_URI} (Nimbus tự cache và tự tải lại khi Google xoay khóa).</li>
- *   <li>{@code aud} = client id của app mình → token phát cho app khác không dùng được ở đây.</li>
- *   <li>{@code iss} là Google (Google trả một trong hai dạng dưới đây).</li>
- *   <li>{@code exp}/{@code nbf} còn hạn ({@link JwtTimestampValidator}).</li>
- * </ol>
- *
- * <p>Cách làm này không cần client secret: secret chỉ dùng cho luồng redirect (đổi code lấy token).
+ * Verify id_token Google trả cho FE. Payload chưa verify thì KHÔNG được tin — ai cũng bịa được JWT chứa email người khác.
+ * Kiểm 4 thứ: chữ ký (public key ở {@link #JWKS_URI}), {@code aud} = client id của app, {@code iss} là Google, còn hạn.
+ * Không cần client secret; secret chỉ dùng cho luồng redirect.
  */
 @Component
 public class GoogleIdTokenVerifier {

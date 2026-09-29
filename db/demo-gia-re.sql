@@ -3,11 +3,11 @@
 -- Profile mặc định (dev) dùng cổng mock, không trừ tiền thật nên không cần script này.
 --
 -- Cách dùng:
---   1. Thêm vào backend/be-view/.env:   CHECKOUT_FEE=0   (phí dịch vụ 0đ)
---   2. cd backend/be-view && set -a; . ./.env; set +a
+--   1. Thêm vào be/.env:   CHECKOUT_FEE=0   (phí dịch vụ 0đ)
+--   2. cd be && set -a; . ./.env; set +a
 --      PGPASSWORD="$DB_PASSWORD" psql -h localhost -U "$DB_USERNAME" -d event-application-db -1 -v ON_ERROR_STOP=1 -f db/demo-gia-re.sql
 --   3. Khởi động lại BE để đọc .env mới.
--- Muốn về giá thật: tạo lại DB rồi seed lại (xem README), vì script này ghi đè giá.
+-- Muốn về giá thật: tạo lại DB rồi seed lại (xem db/README.md), vì script này ghi đè giá.
 -- Đơn/doanh thu cũ trên dashboard giữ nguyên số tiền lúc mua (lịch sử không bị sửa).
 -- =====================================================================================================
 

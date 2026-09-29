@@ -8,7 +8,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/** "Vé của tôi" (ui-api-contract §3 MyTicketResponse). {@code history} chỉ có ở GET /me/tickets/{id}. */
+/** "Vé của tôi". {@code history} chỉ có ở GET /me/tickets/{id}. */
 public record MyTicketResponse(
         UUID id,
         String ticketCode,

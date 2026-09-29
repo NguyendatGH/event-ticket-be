@@ -91,7 +91,6 @@ public class OrganizerEventQueriesImpl implements OrganizerEventQueries {
         return Pages.response(content, p, s, total);
     }
 
-    /** GET /organizer/events/{id} */
     @Override
     @Transactional(readOnly = true)
     public OrganizerEventDetail get(UUID userId, UUID eventId) {
@@ -135,9 +134,8 @@ public class OrganizerEventQueriesImpl implements OrganizerEventQueries {
     }
 
     /**
-     * Chi tiết + số liệu theo hạng vé. CỐ Ý không có @Transactional: OrganizerEventService gọi hàm này ngay sau khi ghi,
-     * nên nó chạy trong transaction ghi đang mở (thấy dữ liệu vừa flush). Nếu gắn readOnly ở đây, chế độ chỉ-đọc
-     * có thể lan sang transaction của bên gọi.
+     * Chi tiết + số liệu theo hạng vé. CỐ Ý không @Transactional: OrganizerEventService gọi ngay sau khi ghi nên hàm này
+     * chạy trong transaction ghi đang mở; gắn readOnly ở đây có thể lan chế độ chỉ-đọc sang transaction bên gọi.
      */
     @Override
     public OrganizerEventDetail detail(Event e) {
@@ -163,8 +161,6 @@ public class OrganizerEventQueriesImpl implements OrganizerEventQueries {
                         .thenComparing(TicketTier::getId))
                 .toList();
     }
-
-    /* ---------- số liệu ---------- */
 
     private record TierNumbers(long available, long sold, long revenue) {
         static final TierNumbers EMPTY = new TierNumbers(0, 0, 0);

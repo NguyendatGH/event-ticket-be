@@ -161,8 +161,6 @@ public class PayOsPaymentGateway implements PaymentGatewayPort {
                 rawBody);
     }
 
-    /* ---- Refund: lệnh chi qua kênh payout (spec-plan/refund-plan-delta.md mục 4) ---- */
-
     @Override
     public RefundSubmitResult submitRefund(RefundCommand command) {
         return payout().submit(command);
@@ -201,10 +199,9 @@ public class PayOsPaymentGateway implements PaymentGatewayPort {
     }
 
     /**
-     * PayOS trả HAI dạng cho cùng trường transactionDateTime: webhook dùng "yyyy-MM-dd HH:mm:ss"
-     * (giờ VN, không offset), còn GET /v2/payment-requests/{id} dùng ISO-8601 có offset
-     * ("2026-09-29T14:41:55+07:00"). Phải nhận cả hai: chỉ nhận dạng webhook thì mọi lần poll một
-     * đơn ĐÃ TRẢ đều ném, PaymentServiceImpl.pollAndApply đọc thành "chưa trả" và hủy oan đơn.
+     * PayOS trả HAI dạng transactionDateTime: webhook "yyyy-MM-dd HH:mm:ss" (giờ VN, không offset),
+     * GET /v2/payment-requests/{id} thì ISO-8601 có offset. Chỉ nhận dạng webhook thì mọi lần poll đơn ĐÃ TRẢ
+     * đều ném, pollAndApply đọc thành "chưa trả" và hủy oan đơn.
      */
     static Instant parseTime(String payosDateTime) {
         if (payosDateTime == null || payosDateTime.isBlank()) return null;

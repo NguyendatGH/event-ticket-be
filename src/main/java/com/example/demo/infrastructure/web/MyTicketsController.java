@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
 
-/** /api/v1/me: vé (MyTicketService) và đơn (OrderQueries) của user đăng nhập (ui-api-contract §4.6). */
+/** /api/v1/me: vé (MyTicketService) và đơn (OrderQueries) của user đăng nhập. */
 @RestController
 @RequestMapping("/api/v1/me")
 @Tag(name = "My tickets", description = "Vé của tôi, đơn của tôi")

@@ -16,9 +16,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 /**
- * Dữ liệu mẫu cho profile dev. Một nguồn sự thật: chạy nguyên file db/seed-dev.sql (pom.xml đưa lên classpath
- * thành seed/seed-dev.sql; file sinh bởi db/gen-seed-sql.py từ seed/events.json), giống hệt khi seed tay bằng psql.
- * Mặc định KHÔNG tự chạy lúc khởi động; bật app.seed.on-startup=true để seed khi chưa có event nào.
+ * Dữ liệu mẫu cho profile dev: chạy nguyên db/seed-dev.sql (sinh bởi db/gen-seed-sql.py từ seed/events.json),
+ * giống hệt seed tay bằng psql. Mặc định không tự chạy; bật app.seed.on-startup=true.
  * POST /dev/seed xóa event/đơn (giữ users, organizers) rồi chạy lại file.
  */
 @Component

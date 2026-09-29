@@ -24,8 +24,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Một lần hoàn tiền cho một nhóm vé của một đơn. Chạy bằng lệnh chi ở provider (execution_method = PAYOUT),
- * không phải đảo giao dịch thu. State machine: spec-plan/refund-code-plan.md mục 2.
+ * Một lần hoàn tiền cho một nhóm vé của một đơn, chạy bằng lệnh chi (PAYOUT) chứ không đảo giao dịch thu.
  * Chỉ RefundResultHandler được gọi succeed()/fail(); service không set status trực tiếp.
  */
 @Entity
@@ -74,9 +73,8 @@ public class Refund {
     private String providerRefundId;
 
     /**
-     * Key gửi provider cho lần thử hiện tại: RF-&lt;refundId&gt;-&lt;attempt&gt;. refundId là UUID nên key không bao giờ
-     * trùng lại sau khi reset DB (xem spec-plan/refund-plan-delta.md mục 2).
-     * Giữ nguyên khi retry sau timeout; xóa (null) khi provider từ chối dứt khoát để lần sau sinh key mới.
+     * Key gửi provider: RF-&lt;refundId&gt;-&lt;attempt&gt;, refundId là UUID nên không trùng lại sau khi reset DB.
+     * Giữ nguyên khi retry sau timeout; xóa khi provider từ chối dứt khoát để lần sau sinh key mới.
      */
     @Column(name = "idempotency_key", length = 100)
     private String idempotencyKey;
@@ -150,7 +148,7 @@ public class Refund {
         return r;
     }
 
-    /** Đích không phải tài khoản đã trả: không tự chi, chờ admin duyệt (refund-implementation-plan 1.12). */
+    /** Đích không phải tài khoản đã trả: không tự chi, chờ admin duyệt. */
     public void holdForDestinationReview() {
         require(RefundStatus.REQUESTED, "MANUAL_REVIEW");
         status = RefundStatus.MANUAL_REVIEW;
@@ -159,9 +157,8 @@ public class Refund {
     }
 
     /**
-     * Gọi trong TX ngay TRƯỚC khi gọi provider. Trả về key cho lần thử này.
-     * Có key sẵn (lần trước timeout) thì dùng lại — đây là thứ chặn chi tiền hai lần;
-     * chưa có thì tăng attempt và sinh key mới.
+     * Gọi trong TX ngay TRƯỚC khi gọi provider, trả key cho lần thử này. Có key sẵn (lần trước timeout) thì dùng lại
+     * — đây là thứ chặn chi tiền hai lần; chưa có thì tăng attempt và sinh key mới.
      */
     public String beginAttempt() {
         if (status != RefundStatus.REQUESTED && status != RefundStatus.AWAITING_FUNDS) {

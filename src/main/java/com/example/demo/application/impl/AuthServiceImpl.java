@@ -150,14 +150,13 @@ public class AuthServiceImpl implements AuthService {
         return users.save(User.create(
                 fullName.trim(),
                 email,
-                passwordEncoder.encode(password),   // chỉ lưu hash, không bao giờ lưu plain text
+                passwordEncoder.encode(password),
                 role));
     }
 
     /**
-     * Tài khoản Google không có mật khẩu do user đặt, nhưng cột password_hash là NOT NULL và luồng
-     * login mật khẩu vẫn phải từ chối họ → lưu hash của một chuỗi ngẫu nhiên không ai biết.
-     * Muốn đăng nhập bằng mật khẩu thì dùng "Quên mật khẩu" để tự đặt.
+     * Tài khoản Google không có mật khẩu nhưng password_hash là NOT NULL và login mật khẩu vẫn phải từ chối họ
+     * → lưu hash của chuỗi ngẫu nhiên không ai biết. Muốn đăng nhập mật khẩu thì dùng "Quên mật khẩu".
      */
     private User createGoogleUser(GoogleIdTokenVerifier.GoogleAccount account, String email) {
         String fullName = account.fullName() == null || account.fullName().isBlank()

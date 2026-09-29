@@ -6,14 +6,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Ghép mệnh đề WHERE động cho JdbcClient: các điều kiện nối bằng "and", giá trị đi kèm là tham số đặt tên.
- * <pre>
- * SqlWhere w = new SqlWhere().add("e.status = :status", "status", status);
- * if (q != null) w.add("e.name ilike :q", "q", Texts.likePattern(q));
- * jdbc.sql("select count(*) from events e" + w.sql()).params(w.params())...
- * </pre>
- * Quy tắc an toàn (chống SQL injection): chuỗi điều kiện chỉ là hằng viết trong code;
- * giá trị người dùng gửi lên LUÔN đi qua tham số (:name), không bao giờ nối vào chuỗi SQL.
+ * Ghép WHERE động cho JdbcClient: điều kiện nối bằng "and", giá trị đi kèm là tham số đặt tên.
+ * Chống SQL injection: chuỗi điều kiện chỉ là hằng viết trong code, giá trị người dùng LUÔN qua tham số (:name).
  */
 public final class SqlWhere {
 

@@ -4,7 +4,6 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 
-/** GET /organizer/dashboard/summary. Ba chỉ số so với khoảng liền trước; events/tickets là số hiện tại (không theo khoảng ngày). */
 public record DashboardSummary(LocalDate from, LocalDate to, Metric revenue, Metric ticketsSold, Metric orders,
                                EventCounts events, TicketCounts tickets) {
 

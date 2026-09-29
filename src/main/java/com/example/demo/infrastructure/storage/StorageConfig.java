@@ -23,14 +23,8 @@ public class StorageConfig implements WebMvcConfigurer {
     }
 
     /**
-     * Chọn nơi lưu ảnh lúc khởi động, theo cấu hình có gì:
-     * <ol>
-     *   <li>{@code CLOUDINARY_URL} (chuỗi gộp Cloudinary cho sẵn ở Dashboard) → Cloudinary.</li>
-     *   <li>Không có thì ghép từ 3 ô rời {@code CLOUDINARY_CLOUD_NAME} / {@code _API_KEY} / {@code _API_SECRET}
-     *       (đúng 3 ô Console hiển thị) → Cloudinary.</li>
-     *   <li>Vẫn không đủ → lưu ở thư mục {@code uploads/}, phục vụ qua {@code GET /uploads/**}.</li>
-     * </ol>
-     * Chọn một lần lúc tạo bean: đổi .env phải khởi động lại app.
+     * Nơi lưu ảnh, ưu tiên: {@code CLOUDINARY_URL} → ghép từ 3 ô {@code CLOUDINARY_CLOUD_NAME}/{@code _API_KEY}/{@code _API_SECRET}
+     * → thư mục {@code uploads/} phục vụ qua {@code GET /uploads/**}. Chọn một lần lúc tạo bean: đổi .env phải restart.
      */
     @Bean
     ImageStorage imageStorage(@Value("${app.storage.cloudinary-url:}") String cloudinaryUrl,
@@ -48,9 +42,8 @@ public class StorageConfig implements WebMvcConfigurer {
     }
 
     /**
-     * Ghép 3 ô rời thành chuỗi {@code cloudinary://<key>:<secret>@<cloud>} mà CloudinaryImageStorage cần.
-     * Thiếu bất kỳ ô nào thì trả chuỗi rỗng = coi như chưa cấu hình: thà lưu tạm ở đĩa,
-     * còn hơn dựng client với cloud rỗng rồi mọi lần upload đều lỗi khó hiểu.
+     * Ghép 3 ô rời thành {@code cloudinary://<key>:<secret>@<cloud>}. Thiếu ô nào thì trả rỗng = chưa cấu hình:
+     * thà lưu tạm ở đĩa còn hơn dựng client với cloud rỗng rồi mọi lần upload đều lỗi khó hiểu.
      */
     static String composeCloudinaryUrl(String cloudName, String apiKey, String apiSecret) {
         if (cloudName.isBlank() || apiKey.isBlank() || apiSecret.isBlank()) return "";

@@ -83,10 +83,6 @@ app:
   cors:
     allowed-origins: http://localhost:3000  
 
-  logging:
-    pattern:
-      console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} [%X{source}][%X{provider}][orderCode=%X{orderCode}] [%level] %logger{36} : %msg%n"
-
 springdoc:
   api-docs:
     path: /v3/api-docs

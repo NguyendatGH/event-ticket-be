@@ -14,7 +14,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Summary và detail (ui-api-contract §3) trong một record: summary bỏ description/schedule/tiers
+ * Summary và detail trong một record: summary bỏ description/schedule/tiers
  * (null, không serialize), organizer ở summary chỉ có id/slug/name/logoUrl/verified.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)

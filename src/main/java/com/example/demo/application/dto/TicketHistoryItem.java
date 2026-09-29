@@ -6,7 +6,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 
 /**
- * Một dòng lịch sử vé (ui-api-contract §3). Tên người đã che: "Tran Thi B" → "Tran B.".
+ * Một dòng lịch sử vé. Tên người đã che: "Tran Thi B" → "Tran B.".
  * Không lưu bảng riêng: vé chỉ có một mốc (phát hành cho chủ vé), suy ra từ chính dòng tickets.
  */
 public record TicketHistoryItem(

@@ -12,9 +12,8 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Tạo/sửa sự kiện của BTC (ui-api-contract §4.4). Lưu nháp chỉ bắt buộc name; field có mặt thì phải hợp lệ.
- * Đủ/thiếu để publish kiểm tra ở Event.publishProblems. {@code tiers} là tập đầy đủ (tier cũ vắng mặt = xóa);
- * null = giữ nguyên tiers.
+ * Tạo/sửa sự kiện của BTC. Lưu nháp chỉ bắt buộc name, field có mặt thì phải hợp lệ (điều kiện publish ở
+ * Event.publishProblems). {@code tiers} là tập đầy đủ — tier cũ vắng mặt = xóa, null = giữ nguyên.
  */
 public record EventUpsertRequest(
         @NotBlank(message = "Tên sự kiện không được trống") @Size(max = 200) String name,

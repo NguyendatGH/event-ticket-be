@@ -67,9 +67,7 @@ public class PaymentServiceImpl implements PaymentService {
         if (gateway.provider() != provider) {
             throw DomainException.notFound("PROVIDER_INACTIVE", "Provider " + provider + " không hoạt động ở profile này");
         }
-        // MDC là ThreadLocal nên phải set trong chính thread xử lý request và clear ở finally.
-        LogContext.set("BACKEND", provider.name(), null);
-        try {
+        try (LogContext.Scope ignored = LogContext.of(provider.name())) {
             PaymentEvent event;
             try {
                 log.info("running handling webhook --");
@@ -79,10 +77,8 @@ public class PaymentServiceImpl implements PaymentService {
                 tx.executeWithoutResult(s -> webhookEvents.save(WebhookEvent.rejected(provider, audit.jsonOrWrapped(rawBody))));
                 throw ex;
             }
-            LogContext.orderCode(String.valueOf(event.orderCode()));   // chỉ biết orderCode sau khi parse được payload
+            LogContext.orderCode(event.orderCode());   // chỉ biết orderCode sau khi parse được payload
             return record(provider, "payment", event);
-        } finally {
-            LogContext.clear();
         }
     }
 
@@ -146,16 +142,18 @@ public class PaymentServiceImpl implements PaymentService {
         return result;
     }
 
-    /** OrderExpiryJob: hỏi provider một lần rồi mới hết hạn (spec-plan 7.3). Trả PAID / EXPIRED / SKIPPED. */
+    /** OrderExpiryJob: hỏi provider một lần rồi mới hết hạn. Trả PAID / EXPIRED / SKIPPED. */
     @Override
     public String settleExpired(UUID orderId) {
         Order order = orders.findById(orderId).orElse(null);
         if (order == null || !order.isPending()) return "SKIPPED";
-        Payment payment = payments.findFirstByOrderIdOrderByCreatedAtDesc(orderId).orElse(null);
-        if (payment != null && pollAndApply(order, payment)) return "PAID";
-        if (!checkout.expire(orderId)) return "SKIPPED";
-        if (payment != null) checkout.cancelLinkQuietly(payment, "order expired");
-        return "EXPIRED";
+        try (LogContext.Scope ignored = LogContext.order(gateway.provider().name(), order.getOrderCode())) {
+            Payment payment = payments.findFirstByOrderIdOrderByCreatedAtDesc(orderId).orElse(null);
+            if (payment != null && pollAndApply(order, payment)) return "PAID";
+            if (!checkout.expire(orderId)) return "SKIPPED";
+            if (payment != null) checkout.cancelLinkQuietly(payment, "order expired");
+            return "EXPIRED";
+        }
     }
 
     /** PaymentReconcileJob: đơn sắp hết hạn, đối chiếu với provider phòng webhook rớt. */
@@ -163,7 +161,9 @@ public class PaymentServiceImpl implements PaymentService {
     public boolean reconcile(UUID orderId) {
         Order order = orders.findById(orderId).orElse(null);
         if (order == null || !order.isPending()) return false;
-        return payments.findFirstByOrderIdOrderByCreatedAtDesc(orderId).map(p -> pollAndApply(order, p)).orElse(false);
+        try (LogContext.Scope ignored = LogContext.order(gateway.provider().name(), order.getOrderCode())) {
+            return payments.findFirstByOrderIdOrderByCreatedAtDesc(orderId).map(p -> pollAndApply(order, p)).orElse(false);
+        }
     }
 
     @Override
@@ -171,12 +171,14 @@ public class PaymentServiceImpl implements PaymentService {
         Order order = orders.findById(orderId)
                 .orElseThrow(() -> DomainException.notFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng"));
         order.requireOwner(userId);          // kiểm quyền trước khi gọi ra provider
-        if (order.isPending() && reconcile(orderId)) {
-            log.warn("Order {} bấm hủy nhưng provider báo đã thanh toán: giữ đơn, đã cấp vé", order.getOrderCode());
-            throw DomainException.conflict("ORDER_ALREADY_PAID",
-                    "Đơn đã được thanh toán nên không hủy được. Vé đã được cấp; dùng chức năng hoàn vé nếu bạn muốn hoàn tiền.");
+        try (LogContext.Scope ignored = LogContext.order(gateway.provider().name(), order.getOrderCode())) {
+            if (order.isPending() && reconcile(orderId)) {
+                log.warn("Order {} bấm hủy nhưng provider báo đã thanh toán: giữ đơn, đã cấp vé", order.getOrderCode());
+                throw DomainException.conflict("ORDER_ALREADY_PAID",
+                        "Đơn đã được thanh toán nên không hủy được. Vé đã được cấp; dùng chức năng hoàn vé nếu bạn muốn hoàn tiền.");
+            }
+            return checkout.cancel(userId, orderId);
         }
-        return checkout.cancel(userId, orderId);
     }
 
     private boolean pollAndApply(Order order, Payment payment) {

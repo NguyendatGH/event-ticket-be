@@ -11,9 +11,8 @@ import org.springframework.stereotype.Component;
 import java.util.Comparator;
 
 /**
- * Chỗ DUY NHẤT đơn tác động lên vé/kho, để webhook, poll (job hết hạn, đối chiếu) và mọi đường hủy
- * cho cùng kết quả. Luôn gọi trong transaction đang giữ khóa order.
- * PAID → cấp vé (owner = người mua); hủy/hết hạn → trả kho.
+ * Chỗ DUY NHẤT đơn tác động lên vé/kho, để webhook, poll và mọi đường hủy cho cùng kết quả.
+ * Luôn gọi trong transaction đang giữ khóa order. PAID → cấp vé; hủy/hết hạn → trả kho.
  */
 @Component
 public class OrderFulfilmentImpl implements OrderFulfilment {

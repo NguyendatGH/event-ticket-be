@@ -6,12 +6,8 @@ import org.springframework.data.domain.PageRequest;
 import java.util.List;
 
 /**
- * Quy ước phân trang chung (ui-api-contract §1): page đếm từ 0, size tối đa 50.
- * Có HAI cách xử lý size lạ (&lt; 1), giữ nguyên vì API đang chạy như vậy (FE luôn gửi size hợp lệ nên không thấy khác):
- * <ul>
- *   <li>{@link #size}: size &lt; 1 → mặc định 12. Dùng cho vé của tôi, đơn của tôi.</li>
- *   <li>{@link #clampSize}: size &lt; 1 → 1. Dùng cho danh sách sự kiện (công khai và của BTC).</li>
- * </ul>
+ * Phân trang chung: page đếm từ 0, size tối đa 50. Size &lt; 1 có HAI cách xử lý, giữ nguyên vì API đang chạy vậy:
+ * {@link #size} → 12 (vé/đơn của tôi), {@link #clampSize} → 1 (danh sách sự kiện).
  */
 public final class Pages {
 
