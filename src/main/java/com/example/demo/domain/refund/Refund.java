@@ -206,6 +206,11 @@ public class Refund {
         failureReason = reason;
     }
 
+    /** Chi tay: tiền không đi qua kênh payout nữa, admin chuyển khoản rồi chốt. */
+    public void useManualTransfer() {
+        executionMethod = RefundExecutionMethod.MANUAL_TRANSFER;
+    }
+
     public void manualReview(String code, String reason) {
         requireNotTerminal("MANUAL_REVIEW");
         status = RefundStatus.MANUAL_REVIEW;

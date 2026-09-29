@@ -17,7 +17,7 @@ events = json.loads((BE / "src/main/resources/seed/events.json").read_text(encod
 NS = uuid.UUID("6f1c4a0e-7f6d-4b1e-9d1a-2f4b5c6d7e8f")          # namespace cố định → id ổn định giữa các lần seed / các máy
 # BCrypt của "password123" (cost 10). Đổi mật khẩu: python3 -c "import bcrypt;print(bcrypt.hashpw(b'...', bcrypt.gensalt(10)).decode())"
 HASH = "$2b$10$EPFYj051vq.sjoof.eNRsuKUHo6JaszY7KGAJAfqvRu/hZSc/Gzsa"
-FEE = 12000                                                     # app.checkout.fee
+FEE = 0                                                         # app.checkout.fee (không thu phí sàn)
 # (họ tên, email, role, phone)
 USERS = [("Nguyen Van A", "a@example.com", "CUSTOMER", "0912345678"),
          ("Tran Thi B", "b@example.com", "CUSTOMER", "0987654321"),
@@ -158,6 +158,11 @@ for o in orders:
     w(f"values ({q(uid('payment', o['id']))}, {q(o['id'])}, 'MOCK', 'seed-{o['code']}', 'seed-{o['code']}', 'SEEDTX{o['code']}', {total}, 'PAID', {paid}, {when}, {paid}) on conflict (id) do nothing;")
     for tk in o["tickets"]:
         w(f"insert into tickets (id, order_id, ticket_tier_id, price, ticket_code, status, issued_at, updated_at, owner_id) values ({q(tk)}, {q(o['id'])}, {q(tid)}, {t['price']}, {q(uid('ticket-code', tk))}, 'ACTIVE', {paid}, {paid}, {user(o['email'])}) on conflict (id) do nothing;")
+    # Bút toán thu, đúng bộ mà LedgerService.recordOrderPaid ghi. Không có nó thì đơn seed coi như chưa thu
+    # đồng nào và RefundResultHandler.assertNotOverRefunded tự tắt -> hoàn tiền mất chặn trần.
+    for acct, dr, amt in (("BANK_COLLECTION", "DEBIT", total), ("CUSTOMER_LIABILITY", "CREDIT", total - FEE), ("FEES", "CREDIT", FEE)):
+        if amt > 0:
+            w(f"insert into ledger_entries (id, account, direction, amount, ref_type, ref_id, occurred_at) values ({q(uid('ledger', o['id'], acct))}, {q(acct)}, {q(dr)}, {amt}, 'ORDER', {q(o['id'])}, {paid}) on conflict (id) do nothing;")
 w("")
 
 w("-- Kiểm tra nhanh:")

@@ -1,6 +1,6 @@
 # Sơ đồ hệ thống ticketing
 
-ERD sinh từ schema thật của Postgres (Flyway `V1`–`V5`); state machine và luồng xử lý đọc từ code.
+ERD sinh từ schema thật của Postgres (Flyway `V1`–`V6`); state machine và luồng xử lý đọc từ code.
 
 - [1–6. ERD theo nhóm bảng](#1-toàn-cảnh)
 - [7. State machine: Order](#7-state-machine-order)
@@ -370,8 +370,8 @@ erDiagram
         varchar account "BANK_COLLECTION | PAYOUT_WALLET | CUSTOMER_LIABILITY | FEES"
         varchar direction "DEBIT | CREDIT"
         bigint amount
-        varchar ref_type
-        uuid ref_id
+        varchar ref_type "ORDER | REFUND"
+        uuid ref_id "không FK: sổ phải sống lâu hơn bản ghi nghiệp vụ"
         timestamptz occurred_at
     }
 
@@ -390,17 +390,32 @@ erDiagram
 
 ## Ghi chú
 
-**3 bảng có trong schema nhưng code chưa dùng** — không có entity JPA nào map tới:
+**Sổ bút toán kép (`ledger_entries`)** — `LedgerService` ghi, mỗi sự kiện một bộ vế cân nhau:
+
+| Sự kiện | Nợ | Có | Ghi ở |
+|---|---|---|---|
+| Đơn sang PAID | `BANK_COLLECTION` | `CUSTOMER_LIABILITY` (+ `FEES` nếu `fee_amount` > 0) | `PaymentServiceImpl.apply()` |
+| Refund SUCCEEDED | `CUSTOMER_LIABILITY` | `PAYOUT_WALLET` | `RefundResultHandler.apply()` |
+
+Chỉ thêm, không sửa không xóa. Lệnh hoàn **đang bay không vào sổ** — chưa chuyển tiền thì chưa phải bút toán;
+phần đó `RefundResultHandler.assertNotOverRefunded()` đếm từ bảng `refunds`. Trần hoàn tiền vì vậy tính từ
+dữ liệu bất biến (sổ) thay vì từ cột `orders.refunded_amount` sửa được.
+
+`V6__ledger_backfill.sql` dựng lại bút toán cho đơn đã PAID trước khi có sổ; `db/seed-dev.sql` cũng sinh
+bút toán cho đơn seed, nếu không thì `paidIn = 0` và invariant tự tắt.
+
+**2 bảng có trong schema nhưng code chưa dùng** — không có entity JPA nào map tới:
 
 | Bảng | Dự định |
 |---|---|
-| `ledger_entries` | Sổ kép đối soát tiền |
 | `wallet_snapshots` | Lịch sử số dư ví chi (hiện `WalletService` tính trực tiếp từ provider) |
 | `refund_inquiries` | Khiếu nại hoàn tiền |
 
 **Quan hệ nét đứt** (`contact_messages.user_id`) là tham chiếu mềm: có cột nhưng không có ràng buộc FK, nên xóa user không vướng tin nhắn cũ.
 
 **Xóa lan (`ON DELETE CASCADE`)** chỉ có ở 2 chỗ: `order_items → orders` và `refund_items → refunds`. Mọi FK còn lại là `NO ACTION` — cố ý, để không xóa nhầm dữ liệu tiền bạc.
+
+**Phí sàn đã bỏ** (`app.checkout.fee` mặc định `0`): hệ thống không chia tiền, PayOS trả vào một tài khoản merchant duy nhất và `organizers` không có cột ngân hàng nào. Cột `fee_amount` giữ lại để bật lại được, đơn mới đều là `0`.
 
 **Khóa lạc quan (`version`)** ở `orders` và `inventory`.
 

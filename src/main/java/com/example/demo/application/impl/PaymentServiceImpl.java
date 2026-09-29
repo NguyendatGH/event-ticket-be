@@ -2,6 +2,7 @@ package com.example.demo.application.impl;
 
 import com.example.demo.application.CheckoutService;
 import com.example.demo.application.GatewayAudit;
+import com.example.demo.application.LedgerService;
 import com.example.demo.application.OrderFulfilment;
 import com.example.demo.application.PaymentService;
 import com.example.demo.application.dto.OrderResponse;
@@ -44,12 +45,13 @@ public class PaymentServiceImpl implements PaymentService {
     private final WebhookEventRepository webhookEvents;
     private final PaymentGatewayPort gateway;
     private final GatewayAudit audit;
+    private final LedgerService ledger;
     private final CheckoutService checkout;
     private final TransactionTemplate tx;
     private final ObjectMapper json;
 
     public PaymentServiceImpl(OrderRepository orders, PaymentRepository payments, OrderFulfilment fulfilment,
-                              WebhookEventRepository webhookEvents, PaymentGatewayPort gateway, GatewayAudit audit,
+                              WebhookEventRepository webhookEvents, PaymentGatewayPort gateway, GatewayAudit audit, LedgerService ledger,
                               CheckoutService checkout, TransactionTemplate tx, ObjectMapper json) {
         this.orders = orders;
         this.payments = payments;
@@ -57,6 +59,7 @@ public class PaymentServiceImpl implements PaymentService {
         this.webhookEvents = webhookEvents;
         this.gateway = gateway;
         this.audit = audit;
+        this.ledger = ledger;
         this.checkout = checkout;
         this.tx = tx;
         this.json = json;
@@ -125,6 +128,7 @@ public class PaymentServiceImpl implements PaymentService {
             } else {
                 payment.confirmPaid(e);
                 order.markPaid(e.amount());
+                ledger.recordOrderPaid(order);
                 int n = fulfilment.fulfil(order);
                 log.info("Order {} PAID, {} vé", order.getOrderCode(), n);
             }

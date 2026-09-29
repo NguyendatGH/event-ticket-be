@@ -66,7 +66,7 @@ app:
     on-startup: false            
   checkout:
     order-ttl: 15m               
-    fee: ${CHECKOUT_FEE:12000} 
+    fee: ${CHECKOUT_FEE:0}              # 0 = không thu phí sàn. Tiền về thẳng tài khoản PayOS của BTC, hệ thống không chia tiền.
   payment:
     return-url: http://localhost:3000/checkout/return    
     cancel-url: http://localhost:3000/checkout/cancel

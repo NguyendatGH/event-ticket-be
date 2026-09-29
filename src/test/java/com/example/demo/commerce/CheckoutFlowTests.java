@@ -198,8 +198,8 @@ class CheckoutFlowTests {
         assertEquals("PENDING_PAYMENT", o.get("status"));
         assertEquals(e.getSlug(), o.get("eventSlug"));
         assertEquals(1_000_000, ((Number) o.get("subtotalAmount")).longValue());
-        assertEquals(12_000, ((Number) o.get("feeAmount")).longValue());
-        assertEquals(1_012_000, ((Number) o.get("totalAmount")).longValue());
+        assertEquals(0, ((Number) o.get("feeAmount")).longValue());
+        assertEquals(1_000_000, ((Number) o.get("totalAmount")).longValue());   // không phí sàn: total == subtotal
         Map<?, ?> payment = payment(o);
         assertEquals("MOCK", payment.get("provider"));
         assertEquals("PENDING", payment.get("status"));
@@ -466,7 +466,7 @@ class CheckoutFlowTests {
     @Test
     void gatewayFailureCancelsOrderReleasesInventoryAndLogsTheCall() {
         Event e = event(EventStatus.PUBLISHED, "Hà Nội");
-        TicketTier t = tier(e, 3, 4, 13);   // 13 + phí 12000 = 12013 -> mock provider từ chối
+        TicketTier t = tier(e, 3, 4, 13);   // tổng 13, mock từ chối khi amount % 1000 == 13
         String key = UUID.randomUUID().toString();
 
         ResponseEntity<Map> res = createOrder(key, e.getId(), t.getId(), 1);

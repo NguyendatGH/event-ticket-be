@@ -3,6 +3,8 @@ package com.example.demo.application;
 import com.example.demo.application.dto.CreateRefundRequest;
 import com.example.demo.application.dto.RefundResponse;
 import com.example.demo.application.dto.ResolveRefundRequest;
+import com.example.demo.application.dto.RefundInstruction;
+import com.example.demo.domain.payment.VietQr;
 import com.example.demo.domain.common.DomainException;
 import com.example.demo.domain.common.LogContext;
 import com.example.demo.domain.event.Event;
@@ -43,6 +45,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -72,6 +76,7 @@ public class RefundService {
     private final GatewayAudit audit;
     private final RefundResultHandler results;
     private final WalletService wallet;
+    private final OrganizerAccess access;
     private final TransactionTemplate tx;
     private final RefundPolicy policy;
     private final boolean payoutEnabled;
@@ -83,7 +88,8 @@ public class RefundService {
     public RefundService(OrderRepository orders, TicketRepository tickets, PaymentRepository payments,
                          EventRepository events, RefundRepository refunds, WebhookEventRepository webhookEvents,
                          IdempotencyService idempotency, PaymentGatewayPort gateway, GatewayAudit audit,
-                         RefundResultHandler results, WalletService wallet, TransactionTemplate tx,
+                         RefundResultHandler results, WalletService wallet, OrganizerAccess access,
+                         TransactionTemplate tx,
                          @Value("${app.refund.fee-percent:0}") int feePercent,
                          @Value("${app.refund.payout-enabled:true}") boolean payoutEnabled,
                          @Value("${app.refund.processing-timeout:30m}") Duration processingTimeout,
@@ -101,6 +107,7 @@ public class RefundService {
         this.audit = audit;
         this.results = results;
         this.wallet = wallet;
+        this.access = access;
         this.tx = tx;
         this.policy = new RefundPolicy(feePercent);
         this.payoutEnabled = payoutEnabled;
@@ -145,16 +152,20 @@ public class RefundService {
         }
         Map<UUID, Long> amounts = policy.check(order, event, selected, Instant.now());
 
-        boolean toPayer = req.destination() == null;
-        String bin = toPayer ? payment.getPayerBankBin() : req.destination().bin();
-        String account = toPayer ? payment.getPayerAccountNumber() : req.destination().accountNumber();
-        if (toPayer && (account == null || account.isBlank() || !BankBins.isBin(bin))) {
-            // Ví điện tử và vài ngân hàng không gửi counterAccount, hoặc gửi mã CITAD không dùng chi được:
-            // khách phải tự CHỌN NGÂN HÀNG + nhập số tài khoản, và refund đó sẽ đi MANUAL_REVIEW.
+        String bin = req.destination() == null ? payment.getPayerBankBin() : req.destination().bin();
+        String account = req.destination() == null ? payment.getPayerAccountNumber() : req.destination().accountNumber();
+
+        // "Về đúng tài khoản người trả" xét theo SỐ TÀI KHOẢN, không theo việc client có gửi destination hay không.
+        // PayOS hay trả counterAccountBankId là mã CITAD 8 số (vd 01201001) mà API chi hộ từ chối, nên số tài khoản
+        // thì biết còn mã ngân hàng thì không. Khách chọn đúng ngân hàng của CHÍNH số tài khoản đó vẫn là tiền về
+        // chỗ cũ -> chạy tự động. Nhập số tài khoản khác mới là tiền đi chỗ mới -> người bán duyệt.
+        boolean toPayer = account != null && !account.isBlank() && account.equals(payment.getPayerAccountNumber());
+
+        if (req.destination() == null && !BankBins.isBin(bin)) {
             throw DomainException.conflict("PAYER_ACCOUNT_UNKNOWN",
-                    "Không xác định được ngân hàng/số tài khoản người trả; gửi kèm destination (bin + accountNumber) để admin duyệt");
+                    "Chưa xác định được ngân hàng của tài khoản đã thanh toán; chọn ngân hàng rồi gửi kèm destination (bin + accountNumber)");
         }
-        if (!toPayer && !BankBins.isBin(bin)) {
+        if (req.destination() != null && !BankBins.isBin(bin)) {
             throw DomainException.badRequest("INVALID_BANK_BIN",
                     "bin phải là mã BIN Napas 6 số; lấy danh sách ở GET /api/v1/config");
         }
@@ -168,7 +179,7 @@ public class RefundService {
         long total = amounts.values().stream().mapToLong(Long::longValue).sum();
         List<RefundItem> items = selected.stream().map(t -> new RefundItem(t.getId(), amounts.get(t.getId()))).toList();
         Refund refund = Refund.request(orderId, payment, items, total, initiator, req.reason(), bin, account, toPayer);
-        if (!toPayer) refund.holdForDestinationReview();
+        if (!toPayer) refund.holdForDestinationReview();   // tài khoản lạ: chờ người bán duyệt, không tự chi
         UUID id = refunds.save(refund).getId();
         log.info("Refund {} tạo cho order {}: {} vé, {} VND, {}", id, order.getOrderCode(), items.size(), total, refund.getStatus());
         return id;
@@ -187,11 +198,19 @@ public class RefundService {
         Refund r = refunds.findById(refundId).orElseThrow();
         if (r.getStatus() != RefundStatus.REQUESTED && r.getStatus() != RefundStatus.AWAITING_FUNDS) return;
         if (!payoutEnabled) {
-            log.warn("app.refund.payout-enabled=false: refund {} giữ {}", refundId, r.getStatus());
+            toManualTransfer(refundId, "PAYOUT_DISABLED", "app.refund.payout-enabled=false, chuyển tay");
             return;
         }
 
-        long available = wallet.available();                                 // gọi provider, ngoài TX
+        long available;
+        try {
+            available = wallet.available();                                  // gọi provider, ngoài TX
+        } catch (RuntimeException ex) {
+            // Kênh chi chưa cấu hình hoặc PayOS không trả lời. Không được ném ra: TX1 đã giữ vé REFUND_PENDING
+            // và đơn REFUND_PROCESSING, ném ra là khách nhận 500 còn đơn kẹt không ai gỡ.
+            toManualTransfer(refundId, "PAYOUT_UNAVAILABLE", ex.toString());
+            return;
+        }
         if (r.getAmount() > available) {
             tx.executeWithoutResult(s -> refunds.findWithLockById(refundId)
                     .ifPresent(x -> x.awaitFunds("INSUFFICIENT_PAYOUT_BALANCE")));
@@ -237,6 +256,70 @@ public class RefundService {
         if (res.status().isFinal() || res.status() == RefundStatusResult.Status.ON_HOLD) {
             results.apply(refundId, new RefundStatusResult(res.status(), res.providerRefundId(), null, null, Instant.now()), false);
         }
+    }
+
+    /**
+     * Không chi tự động được thì đẩy sang MANUAL_REVIEW để admin chuyển tay, KHÔNG để refund nằm im ở REQUESTED.
+     * Admin lấy thông tin chuyển khoản ở GET /admin/refunds/{id}/instruction rồi chốt bằng POST .../resolve.
+     */
+    /** Refund của BTC đang đăng nhập. Tiền nằm ở tài khoản BTC nên chính họ duyệt refund tài khoản lạ. */
+    @Transactional(readOnly = true)
+    public List<RefundResponse> byOrganizer(UUID actorId, RefundStatus status) {
+        UUID organizerId = access.currentOrganizer(actorId).getId();
+        List<String> statuses = (status == null ? List.of(RefundStatus.values()) : List.of(status))
+                .stream().map(Enum::name).toList();
+        return refunds.findAllByOrganizer(organizerId, statuses).stream().map(RefundResponse::from).toList();
+    }
+
+    /** Như {@link #resolve} nhưng chặn BTC chốt refund của sự kiện người khác (404, không lộ id có tồn tại). */
+    public RefundResponse resolveOwned(UUID actorId, UUID refundId, ResolveRefundRequest req) {
+        UUID organizerId = access.currentOrganizer(actorId).getId();
+        if (refunds.countByOrganizerAndId(organizerId, refundId) == 0) {
+            throw DomainException.notFound("REFUND_NOT_FOUND", "Không tìm thấy yêu cầu hoàn tiền");
+        }
+        return resolve(refundId, req);
+    }
+
+    /** Như {@link #instruction} nhưng giới hạn trong sự kiện của BTC đang đăng nhập. */
+    @Transactional(readOnly = true)
+    public RefundInstruction instructionOwned(UUID actorId, UUID refundId) {
+        UUID organizerId = access.currentOrganizer(actorId).getId();
+        if (refunds.countByOrganizerAndId(organizerId, refundId) == 0) {
+            throw DomainException.notFound("REFUND_NOT_FOUND", "Không tìm thấy yêu cầu hoàn tiền");
+        }
+        return instruction(refundId);
+    }
+
+    /**
+     * Hướng dẫn chuyển khoản tay cho refund không chi tự động được. Chỉ admin gọi.
+     * Không có đích hợp lệ (ví điện tử không trả counterAccount) thì 409, đừng dựng QR sai đưa admin quét.
+     */
+    @Transactional(readOnly = true)
+    public RefundInstruction instruction(UUID refundId) {
+        Refund r = refunds.findById(refundId)
+                .orElseThrow(() -> DomainException.notFound("REFUND_NOT_FOUND", "Không tìm thấy yêu cầu hoàn tiền"));
+        String bin = r.getDestinationBin();
+        String account = r.getDestinationAccount();
+        if (!BankBins.isBin(bin) || account == null || account.isBlank()) {
+            throw DomainException.conflict("REFUND_DESTINATION_UNKNOWN",
+                    "Refund chưa có ngân hàng/số tài khoản hợp lệ để dựng QR");
+        }
+        long orderCode = orders.findById(r.getOrderId()).map(Order::getOrderCode).orElse(0L);
+        String content = VietQr.sanitizeContent("HOAN VE " + orderCode);
+        String qrImage = "https://img.vietqr.io/image/" + bin + "-" + account + "-compact2.png?amount=" + r.getAmount()
+                + "&addInfo=" + URLEncoder.encode(content, StandardCharsets.UTF_8);
+        return new RefundInstruction(qrImage, VietQr.build(bin, account, r.getAmount(), content),
+                bin, BankBins.nameOf(bin), account, r.getAmount(), content);
+    }
+
+    private void toManualTransfer(UUID refundId, String code, String reason) {
+        tx.executeWithoutResult(s -> refunds.findWithLockById(refundId)
+                .filter(x -> x.getStatus() == RefundStatus.REQUESTED || x.getStatus() == RefundStatus.AWAITING_FUNDS)
+                .ifPresent(x -> {
+                    x.useManualTransfer();
+                    x.manualReview(code, reason);
+                }));
+        log.warn("Refund {} không chi tự động được ({}): chuyển MANUAL_REVIEW để admin chuyển tay", refundId, code);
     }
 
     /**

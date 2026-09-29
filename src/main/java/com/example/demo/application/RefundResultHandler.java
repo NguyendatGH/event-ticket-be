@@ -1,5 +1,6 @@
 package com.example.demo.application;
 
+import com.example.demo.domain.ledger.LedgerAccount;
 import com.example.demo.domain.order.Order;
 import com.example.demo.domain.order.Ticket;
 import com.example.demo.domain.order.TicketStatus;
@@ -43,13 +44,15 @@ public class RefundResultHandler {
     private final OrderRepository orders;
     private final TicketRepository tickets;
     private final InventoryRepository inventory;
+    private final LedgerService ledger;
 
     public RefundResultHandler(RefundRepository refunds, OrderRepository orders, TicketRepository tickets,
-                               InventoryRepository inventory) {
+                               InventoryRepository inventory, LedgerService ledger) {
         this.refunds = refunds;
         this.orders = orders;
         this.tickets = tickets;
         this.inventory = inventory;
+        this.ledger = ledger;
     }
 
     /**
@@ -86,6 +89,7 @@ public class RefundResultHandler {
                 long remaining = tickets.countByOrderIdAndStatusNot(order.getId(), TicketStatus.REFUNDED);
                 order.onRefundSucceeded(refund.getAmount(), remaining);
                 releaseInventory(items);
+                ledger.recordRefundSettled(refund);
                 assertNotOverRefunded(order);
                 log.info("Refund {} SUCCEEDED: {} vé, {} VND, order {} -> {}",
                         refundId, items.size(), refund.getAmount(), order.getOrderCode(), order.getStatus());
@@ -108,17 +112,18 @@ public class RefundResultHandler {
     }
 
     /**
-     * Không bao giờ hoàn quá số tiền đã thu của đơn. Ném ra là rollback cả transaction — đúng ý: thà refund
-     * không chốt được còn hơn sổ sách sai.
+     * Không bao giờ hoàn quá số tiền đã thu. Số đã thu và đã hoàn lấy từ sổ ledger (bất biến), phần đang bay
+     * lấy từ bảng refunds (chưa chuyển tiền nên chưa vào sổ). Ném ra là rollback cả transaction — đúng ý:
+     * thà refund không chốt được còn hơn sổ sách sai.
      */
     private void assertNotOverRefunded(Order order) {
-        long paid = order.getPaidAmount();
-        if (paid <= 0) return;                     // đơn cũ chưa ghi paid_amount: không có gì để so
-        long open = refunds.sumAmountByOrderIdAndStatusIn(order.getId(), OPEN);
-        long total = order.getRefundedAmount() + open;
-        if (total > paid) {
-            throw new IllegalStateException("Đơn " + order.getOrderCode() + ": tổng hoàn " + total
-                    + " vượt số đã thu " + paid + " (đã hoàn " + order.getRefundedAmount() + ", đang chạy " + open + ")");
+        long paidIn = ledger.customerLiabilityOf(order.getId());
+        if (paidIn <= 0) return;                   // chưa có bút toán thu: không có gì để so
+        long refunded = ledger.refundedOf(order.getId());
+        long inFlight = refunds.sumAmountByOrderIdAndStatusIn(order.getId(), OPEN);
+        if (refunded + inFlight > paidIn) {
+            throw new IllegalStateException("Đơn " + order.getOrderCode() + ": tổng hoàn " + (refunded + inFlight)
+                    + " vượt số đã thu " + paidIn + " (đã hoàn " + refunded + ", đang chạy " + inFlight + ")");
         }
     }
 

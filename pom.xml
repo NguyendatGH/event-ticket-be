@@ -183,7 +183,7 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <systemPropertyVariables>
-                        <app.checkout.fee>12000</app.checkout.fee>
+                        <app.checkout.fee>0</app.checkout.fee>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>

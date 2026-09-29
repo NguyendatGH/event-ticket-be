@@ -2,6 +2,7 @@ package com.example.demo.commerce;
 
 import com.example.demo.application.RefundService;
 import com.example.demo.application.WalletService;
+import com.example.demo.application.dto.RefundInstruction;
 import com.example.demo.application.dto.ResolveRefundRequest;
 import com.example.demo.domain.common.DomainException;
 import com.example.demo.domain.event.Event;
@@ -211,6 +212,63 @@ class RefundFlowTests {
         assertEquals("REFUNDED", get("/api/v1/orders/" + order.get("id")).getBody().get("status"));
         ids.forEach(id -> assertEquals("REFUNDED", ticketStatus(id)));
         assertEquals(10, available(t), "kho phải được cộng lại");
+    }
+
+    @Test
+    void ledgerBalancesAndRecordsBothSidesOfPaymentAndRefund() {
+        Event e = event();
+        TicketTier t = tier(e, 10, 200_000);
+        Map<?, ?> order = paidOrder(e, t, 2);
+        String orderId = (String) order.get("id");
+
+        assertEquals(400_000L, ledgerSum(orderId, "BANK_COLLECTION", "DEBIT"), "tiền vào tài khoản thu");
+        assertEquals(400_000L, ledgerSum(orderId, "CUSTOMER_LIABILITY", "CREDIT"), "sinh nợ với khách");
+        assertEquals(0L, ledgerSum(orderId, "FEES", "CREDIT"), "không còn phí sàn");
+        assertBalanced("ORDER", orderId);
+
+        Map<?, ?> r = requestRefund(orderId, ticketIds(order), UUID.randomUUID().toString(), null).getBody();
+        String refundId = (String) r.get("id");
+        assertEquals(0, countLedger("REFUND", refundId), "lệnh đang bay chưa được vào sổ");
+
+        post("/mock-gateway/refunds/" + refundId + "/succeed");
+
+        assertEquals("SUCCEEDED", refund(refundId).get("status"));
+        assertEquals(400_000L, ledgerSum(refundId, "CUSTOMER_LIABILITY", "DEBIT"), "giảm nợ với khách");
+        assertEquals(400_000L, ledgerSum(refundId, "PAYOUT_WALLET", "CREDIT"), "tiền rời ví chi");
+        assertBalanced("REFUND", refundId);
+    }
+
+    @Test
+    void refundInstructionGivesAdminAScannableVietQr() {
+        Event e = event();
+        TicketTier t = tier(e, 10, 200_000);
+        Map<?, ?> order = paidOrder(e, t, 1);
+        Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(), null).getBody();
+
+        RefundInstruction ins = refundService.instruction(UUID.fromString((String) r.get("id")));
+
+        assertEquals(200_000, ins.amount());
+        assertTrue(ins.qrImageUrl().startsWith("https://img.vietqr.io/image/"), ins.qrImageUrl());
+        assertTrue(ins.qrPayload().startsWith("000201"), "chuỗi EMVCo");
+        assertTrue(ins.content().length() <= 25, "nội dung CK tối đa 25 ký tự");
+        assertEquals(ins.bankBin(), ins.bankBin().replaceAll("\\D", ""), "BIN phải là số");
+    }
+
+    private long ledgerSum(String refId, String account, String direction) {
+        return jdbc.queryForObject("select coalesce(sum(amount), 0) from ledger_entries where ref_id = ?::uuid"
+                + " and account = ? and direction = ?", Long.class, refId, account, direction);
+    }
+
+    private int countLedger(String refType, String refId) {
+        return jdbc.queryForObject("select count(*) from ledger_entries where ref_type = ? and ref_id = ?::uuid",
+                Integer.class, refType, refId);
+    }
+
+    private void assertBalanced(String refType, String refId) {
+        assertEquals(
+                jdbc.queryForObject("select coalesce(sum(amount),0) from ledger_entries where ref_type=? and ref_id=?::uuid and direction='DEBIT'", Long.class, refType, refId),
+                jdbc.queryForObject("select coalesce(sum(amount),0) from ledger_entries where ref_type=? and ref_id=?::uuid and direction='CREDIT'", Long.class, refType, refId),
+                "bút toán phải cân: nợ == có");
     }
 
     @Test
@@ -495,6 +553,25 @@ class RefundFlowTests {
                 Map.of("bin", "970436", "accountNumber", "1234567891")).getBody();
         assertEquals("MANUAL_REVIEW", r.get("status"), String.valueOf(r));
         assertEquals("970436", r.get("destinationBin"));
+    }
+
+    @Test
+    void sameAccountWithChosenBankRunsAutomatically() {
+        Event e = event();
+        TicketTier t = tier(e, 10, 200_000);
+        Map<?, ?> order = paidOrderWithPayerBank(e, t, "01201001");        // PayOS trả mã CITAD, chỉ thiếu mã ngân hàng
+
+        // Khách chọn ngân hàng cho ĐÚNG số tài khoản đã thanh toán -> tiền vẫn về chỗ cũ, không cần ai duyệt.
+        Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(),
+                Map.of("bin", "970436", "accountNumber", "0123456789012")).getBody();
+
+        assertEquals("PROCESSING", r.get("status"), String.valueOf(r));
+        assertEquals(Boolean.TRUE, r.get("destinationIsPayer"), "khớp số tài khoản thì vẫn tính là người trả");
+        assertEquals("970436", r.get("destinationBin"), "dùng ngân hàng khách chọn, không dùng mã CITAD");
+
+        post("/mock-gateway/refunds/" + r.get("id") + "/succeed");
+        assertEquals("SUCCEEDED", refund(r.get("id")).get("status"));
+        assertEquals("REFUNDED", get("/api/v1/orders/" + order.get("id")).getBody().get("status"));
     }
 
     @Test

@@ -78,7 +78,7 @@ class FoundationTests {
     void configIsPublicAndMatchesApplicationYaml() {
         ResponseEntity<Map> res = get("/api/v1/config", null);
         assertEquals(200, res.getStatusCode().value());
-        assertEquals(12000, ((Number) res.getBody().get("checkoutFee")).intValue());
+        assertEquals(0, ((Number) res.getBody().get("checkoutFee")).intValue());
     }
 
     @Test

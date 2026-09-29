@@ -4,6 +4,7 @@ import com.example.demo.application.AdminAuditService;
 import com.example.demo.application.RefundService;
 import com.example.demo.application.WalletService;
 import com.example.demo.application.dto.OrderAudit;
+import com.example.demo.application.dto.RefundInstruction;
 import com.example.demo.application.dto.RefundResponse;
 import com.example.demo.application.dto.ResolveRefundRequest;
 import com.example.demo.domain.refund.RefundStatus;
@@ -58,6 +59,16 @@ public class AdminController {
                     + "Khác MANUAL_REVIEW → 409 REFUND_NOT_IN_REVIEW.")
     public RefundResponse resolve(@PathVariable UUID id, @Valid @RequestBody ResolveRefundRequest req) {
         return refunds.resolve(id, req);
+    }
+
+    @GetMapping("/refunds/{id}/instruction")
+    @Operation(summary = "Thông tin chuyển khoản tay cho một refund",
+            description = "Dùng khi refund vào MANUAL_REVIEW vì không chi tự động được (chưa cấu hình kênh chi, "
+                    + "ví hỏng, hoặc payout-enabled=false). Quét qrImageUrl bằng app ngân hàng, chuyển xong thì "
+                    + "POST /admin/refunds/{id}/resolve với outcome=SUCCEEDED. 409 REFUND_DESTINATION_UNKNOWN nếu "
+                    + "refund chưa có ngân hàng/số tài khoản hợp lệ.")
+    public RefundInstruction instruction(@PathVariable UUID id) {
+        return refunds.instruction(id);
     }
 
     @GetMapping("/refunds/wallet")

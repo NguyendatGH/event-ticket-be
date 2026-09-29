@@ -39,6 +39,24 @@ public interface RefundRepository extends JpaRepository<Refund, UUID> {
 
     List<Refund> findAllByStatusInOrderByCreatedAtDesc(Collection<RefundStatus> statuses);
 
+    /** Refund của các sự kiện thuộc một BTC. Tiền nằm ở tài khoản BTC nên chính họ duyệt, không phải admin. */
+    @Query(value = """
+            select r.* from refunds r
+            join orders o on o.id = r.order_id
+            join events e on e.id = o.event_id
+            where e.organizer_id = :organizerId and r.status in (:statuses)
+            order by r.created_at desc
+            """, nativeQuery = true)
+    List<Refund> findAllByOrganizer(@Param("organizerId") UUID organizerId, @Param("statuses") Collection<String> statuses);
+
+    @Query(value = """
+            select count(*) from refunds r
+            join orders o on o.id = r.order_id
+            join events e on e.id = o.event_id
+            where e.organizer_id = :organizerId and r.id = :refundId
+            """, nativeQuery = true)
+    long countByOrganizerAndId(@Param("organizerId") UUID organizerId, @Param("refundId") UUID refundId);
+
     long countByStatus(RefundStatus status);
 
     /** Tiền đang cam kết chi (đang gửi hoặc provider đang xử lý). */
