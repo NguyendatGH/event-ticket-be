@@ -43,7 +43,9 @@ public class RefundController {
     @Operation(summary = "Yêu cầu hoàn tiền cho một số vé của đơn",
             description = "202 kèm refund đang chạy; tiền đi bất đồng bộ nên đọc GET /refunds/{id} để biết kết quả. "
                     + "Không gửi destination = hoàn về đúng tài khoản đã trả (tự chạy). Gửi destination = tài khoản khác "
-                    + "→ vào MANUAL_REVIEW chờ admin duyệt. Lỗi: 404 ORDER_NOT_FOUND, 409 ORDER_NOT_REFUNDABLE, "
+                    + "→ vào MANUAL_REVIEW chờ admin duyệt. contactEmail BẮT BUỘC: email khách muốn nhận thông báo "
+                    + "về yêu cầu này (dùng khi ban tổ chức hủy yêu cầu), thiếu hoặc sai format → 400 VALIDATION. "
+                    + "Lỗi: 404 ORDER_NOT_FOUND, 409 ORDER_NOT_REFUNDABLE, "
                     + "409 REFUND_DEADLINE_PASSED, 409 TICKET_NOT_REFUNDABLE, 400 TICKET_NOT_IN_ORDER, "
                     + "409 PAYER_ACCOUNT_UNKNOWN, 400 DESTINATION_IS_MERCHANT.")
     public RefundResponse create(@PathVariable UUID orderId,

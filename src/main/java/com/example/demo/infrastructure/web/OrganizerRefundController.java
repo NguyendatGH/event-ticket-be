@@ -51,9 +51,18 @@ public class OrganizerRefundController {
     }
 
     @PostMapping("/{id}/resolve")
-    @Operation(summary = "Chốt một refund MANUAL_REVIEW",
+    @Operation(summary = "Chốt hoặc hủy một yêu cầu hoàn tiền",
             description = "SUCCEEDED/FAILED đi qua cùng đường với kết quả từ provider (hoàn kho đúng một lần). "
-                    + "RETRY chỉ hợp lệ khi provider CHƯA nhận lệnh. Khác MANUAL_REVIEW → 409 REFUND_NOT_IN_REVIEW.")
+                    + "RETRY chỉ hợp lệ khi provider CHƯA nhận lệnh. Ba outcome này chỉ nhận refund đang "
+                    + "MANUAL_REVIEW, khác → 409 REFUND_NOT_IN_REVIEW.\n\n"
+                    + "CANCELLED = hủy yêu cầu hoàn tiền: hủy được từ MANUAL_REVIEW hoặc AWAITING_FUNDS, "
+                    + "BẮT BUỘC có note (lý do hủy), thiếu → 400 REFUND_CANCEL_NOTE_REQUIRED. "
+                    + "Trạng thái khác → 409 REFUND_NOT_CANCELLABLE (REQUESTED: lệnh có thể đang bay ở provider; "
+                    + "PROCESSING: tiền đang chuyển). Lệnh đã nằm ở provider (providerRefundId != null, ví dụ "
+                    + "MANUAL_REVIEW do PROCESSING_TIMEOUT hay ON_HOLD) → 409 REFUND_ALREADY_AT_PROVIDER: "
+                    + "tra dashboard PayOS rồi chốt SUCCEEDED/FAILED, không hủy. "
+                    + "Hủy xong refund ở FAILED + failureCode=CANCELLED_BY_ORGANIZER, vé về ACTIVE nên khách "
+                    + "giữ vé và xin hoàn lại được; kho không đổi vì vé chưa từng nhả.")
     public RefundResponse resolve(@PathVariable UUID id, @Valid @RequestBody ResolveRefundRequest req) {
         return refunds.resolveOwned(CurrentUser.require(), id, req);
     }

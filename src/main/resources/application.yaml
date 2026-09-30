@@ -31,6 +31,22 @@ spring:
     multipart:
       max-file-size: 5MB       
       max-request-size: 6MB
+  
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    # Đặt trong .env là MY_EMAIL. KHÔNG fallback sang ${USERNAME:}: máy này có sẵn biến môi trường
+    # USERNAME=rio của hệ điều hành, và biến môi trường ưu tiên CAO HƠN file .env, nên fallback đó
+    # sẽ âm thầm auth SMTP bằng "rio" thay vì email → fail mà log không nói rõ vì sao.
+    username: ${MY_EMAIL:}
+    password: ${APP_PW:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
 
 app:
   payos:
@@ -47,18 +63,22 @@ app:
     secret: ${JWT_SECRET}       
     access-token-ttl: 15m
   auth:
-    refresh-token-ttl: 14d        # refresh token opaque, rotation mỗi lần POST /auth/refresh
-    reset-token-ttl: 30m          # token đặt lại mật khẩu, dùng một lần
-    reset-password-url: http://localhost:3000/auth/reset-password   # link gửi cho user, app thêm ?token=
+    refresh-token-ttl: 14d    
+    reset-token-ttl: 30m        
+    reset-password-url: http://localhost:3000/auth/reset-password   
     google:
-      # OAuth Client ID (loại "Web application") tạo ở Google Cloud Console. Bỏ trống = tắt đăng nhập Google.
-      # Không cần client secret: BE chỉ verify id_token FE gửi lên, không tự đổi code lấy token.
       client-id: ${GOOGLE_CLIENT_ID:}
+  mail:
+    enabled: ${MAIL_ENABLED:true}                                    # false = chỉ log nội dung mail, không gọi SMTP (test/dev không cần mạng)
+    from: ${MY_EMAIL:}                                               # rỗng = chưa cấu hình: Mailer log.warn rồi bỏ qua, app vẫn chạy
+    organizer-refunds-url: http://localhost:3000/organizer/refunds   # link trong mail trỏ về FE (port 3000, giống app.auth.reset-password-url)
+    # Link trang đơn cho mail gửi KHÁCH. {orderId} là chỗ RefundNotifier thay bằng id đơn thật.
+    # Route lấy từ FE: fe/src/app/router.jsx khai "orders/:id" -> /orders/<uuid>.
+    order-url-template: http://localhost:3000/orders/{orderId}
   storage:
-    local-dir: uploads            # không có CLOUDINARY_URL: lưu ảnh ở đây, phục vụ GET /uploads/**
-    public-base-url: ""           # rỗng → URL tương đối /uploads/..., FE proxy /uploads
-    cloudinary-url: ${CLOUDINARY_URL:}   # cloudinary://<api_key>:<api_secret>@<cloud_name> → upload lên Cloudinary thay vì disk
-    # Hoặc điền rời đúng 3 ô Console Cloudinary hiển thị (chỉ dùng khi CLOUDINARY_URL bỏ trống).
+    local-dir: uploads            
+    public-base-url: ""          
+    cloudinary-url: ${CLOUDINARY_URL:} 
     cloudinary-cloud-name: ${CLOUDINARY_CLOUD_NAME:}
     cloudinary-api-key: ${CLOUDINARY_API_KEY:}
     cloudinary-api-secret: ${CLOUDINARY_API_SECRET:}
@@ -66,7 +86,7 @@ app:
     on-startup: false            
   checkout:
     order-ttl: 15m               
-    fee: ${CHECKOUT_FEE:0}              # 0 = không thu phí sàn. Tiền về thẳng tài khoản PayOS của BTC, hệ thống không chia tiền.
+    fee: ${CHECKOUT_FEE:0}         
   payment:
     return-url: http://localhost:3000/checkout/return    
     cancel-url: http://localhost:3000/checkout/cancel

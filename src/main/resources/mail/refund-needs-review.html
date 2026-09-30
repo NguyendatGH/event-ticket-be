@@ -1,0 +1,54 @@
+<!-- Mail yêu cầu hoàn vé cần người xử lý tay. Biến: organizerName orderCode amount ticketCount
+     reasonCode reasonText customerName customerEmail refundsUrl
+     reasonText là câu giải thích tiếng Việt, được map từ reasonCode trong Mailer.reasonText(). -->
+<div style="margin:0;padding:24px 16px;background:#f4f5f7;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+  <div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:8px;padding:28px 24px;">
+
+    <h1 style="margin:0 0 16px;font-size:20px;line-height:1.4;color:#b91c1c;">
+      Một yêu cầu hoàn vé cần bạn xử lý tay
+    </h1>
+
+    <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">
+      Xin chào {{organizerName}}, hệ thống đã <strong>dừng xử lý tự động</strong> một yêu cầu hoàn vé.
+      Yêu cầu này sẽ nằm đó chờ bạn — sẽ không có lệnh chi nào tự gửi thêm.
+    </p>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           style="width:100%;font-size:14px;line-height:1.6;background:#f9fafb;border-radius:6px;margin:0 0 20px;">
+      <tr>
+        <td style="padding:12px 14px;color:#6b7280;width:40%;">Mã đơn</td>
+        <td style="padding:12px 14px;font-weight:bold;">{{orderCode}}</td>
+      </tr>
+      <tr>
+        <td style="padding:12px 14px;color:#6b7280;">Số tiền cần hoàn</td>
+        <td style="padding:12px 14px;font-weight:bold;">{{amount}}</td>
+      </tr>
+      <tr>
+        <td style="padding:12px 14px;color:#6b7280;">Số vé</td>
+        <td style="padding:12px 14px;">{{ticketCount}}</td>
+      </tr>
+      <tr>
+        <td style="padding:12px 14px;color:#6b7280;">Khách hàng</td>
+        <td style="padding:12px 14px;">{{customerName}} &middot; {{customerEmail}}</td>
+      </tr>
+    </table>
+
+    <p style="margin:0 0 6px;font-size:14px;line-height:1.6;color:#6b7280;">Lý do</p>
+    <p style="margin:0 0 20px;font-size:14px;line-height:1.6;background:#fee2e2;border-radius:6px;padding:12px 14px;">
+      <strong style="font-family:'Courier New',Courier,monospace;">{{reasonCode}}</strong><br>
+      {{reasonText}}
+    </p>
+
+    <p style="margin:0 0 20px;">
+      <a href="{{refundsUrl}}"
+         style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-size:15px;font-weight:bold;padding:12px 24px;border-radius:6px;">
+        Mở trang xử lý hoàn vé
+      </a>
+    </p>
+
+    <p style="margin:0;font-size:12px;line-height:1.6;color:#6b7280;word-break:break-all;">
+      Nút không bấm được? Dán link này vào trình duyệt:<br>{{refundsUrl}}
+    </p>
+
+  </div>
+</div>

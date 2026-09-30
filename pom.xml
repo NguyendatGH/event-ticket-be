@@ -59,6 +59,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webmvc</artifactId>
         </dependency>
+        <dependency>
+            <!-- Gửi mail qua SMTP: cho ta JavaMailSender + MimeMessageHelper (Mailer dùng).
+                 KHÔNG thêm thymeleaf: template mail chỉ là file HTML nhỏ, tự thay {{bien}} trong MailTemplates là đủ. -->
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>

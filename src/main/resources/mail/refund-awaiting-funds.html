@@ -1,0 +1,60 @@
+<!-- Mail nhắc ban tổ chức nạp ví payout. Biến: organizerName orderCode amount ticketCount
+     customerName customerEmail refundsUrl   (amount đã được format sẵn trong Java) -->
+<div style="margin:0;padding:24px 16px;background:#f4f5f7;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+  <div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:8px;padding:28px 24px;">
+
+    <h1 style="margin:0 0 16px;font-size:20px;line-height:1.4;color:#b45309;">
+      Ví chi không đủ tiền — một yêu cầu hoàn vé đang chờ
+    </h1>
+
+    <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">
+      Xin chào {{organizerName}}, hệ thống vừa nhận một yêu cầu hoàn vé nhưng <strong>ví chi hộ (payout) của bạn
+      không đủ tiền</strong> nên chưa thể chuyển cho khách.
+    </p>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           style="width:100%;font-size:14px;line-height:1.6;background:#f9fafb;border-radius:6px;margin:0 0 20px;">
+      <tr>
+        <td style="padding:12px 14px;color:#6b7280;width:40%;">Mã đơn</td>
+        <td style="padding:12px 14px;font-weight:bold;">{{orderCode}}</td>
+      </tr>
+      <tr>
+        <td style="padding:12px 14px;color:#6b7280;">Số tiền cần hoàn</td>
+        <td style="padding:12px 14px;font-weight:bold;">{{amount}}</td>
+      </tr>
+      <tr>
+        <td style="padding:12px 14px;color:#6b7280;">Số vé</td>
+        <td style="padding:12px 14px;">{{ticketCount}}</td>
+      </tr>
+      <tr>
+        <td style="padding:12px 14px;color:#6b7280;">Khách hàng</td>
+        <td style="padding:12px 14px;">{{customerName}} &middot; {{customerEmail}}</td>
+      </tr>
+    </table>
+
+    <p style="margin:0 0 12px;font-size:15px;line-height:1.6;">
+      <strong>Bạn cần làm gì:</strong> nạp thêm tiền vào ví payout (ít nhất {{amount}}).
+    </p>
+    <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#4b5563;">
+      Yêu cầu này đã được <strong>xếp vào hàng chờ</strong>, bạn không phải bấm gửi lại: hệ thống tự kiểm tra ví
+      theo định kỳ và tự gửi lệnh chi ngay khi ví đủ tiền (các yêu cầu được xử lý lần lượt theo thứ tự vào hàng).
+    </p>
+
+    <p style="margin:0 0 20px;font-size:14px;line-height:1.6;background:#fef3c7;border-radius:6px;padding:12px 14px;">
+      Lưu ý: nếu sau <strong>24 giờ</strong> ví vẫn không đủ, yêu cầu sẽ chuyển sang trạng thái
+      <strong>chờ chuyển khoản tay</strong> — lúc đó bạn phải tự chuyển tiền cho khách rồi đánh dấu đã hoàn.
+    </p>
+
+    <p style="margin:0 0 20px;">
+      <a href="{{refundsUrl}}"
+         style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-size:15px;font-weight:bold;padding:12px 24px;border-radius:6px;">
+        Xem yêu cầu hoàn vé
+      </a>
+    </p>
+
+    <p style="margin:0;font-size:12px;line-height:1.6;color:#6b7280;word-break:break-all;">
+      Nút không bấm được? Dán link này vào trình duyệt:<br>{{refundsUrl}}
+    </p>
+
+  </div>
+</div>

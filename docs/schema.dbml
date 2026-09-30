@@ -1,0 +1,464 @@
+// Lược đồ CSDL ticketing — dán nguyên file này vào https://dbdiagram.io/d
+//
+// Sinh từ information_schema của Postgres đang chạy (Flyway V1–V6), không viết tay.
+// Sinh lại: xem docs/ERD.md mục "Sinh lại schema.dbml".
+//
+// LƯU Ý khi export SQL từ dbdiagram: các `Enum` dưới đây trong DB thật là
+// `varchar` + `CHECK (col in (...))`, KHÔNG phải kiểu enum của Postgres.
+// Đặt tên enum theo <bảng>_<cột> vì nhiều bảng có cột `status`/`direction` trùng tên nhưng khác tập giá trị.
+
+Project ticketing {
+  database_type: 'PostgreSQL'
+  Note: '''
+    Bán vé sự kiện: đặt vé giữ chỗ, thanh toán qua PayOS, cấp vé, hoàn tiền bằng lệnh chi.
+    Schema do Flyway quản lý ở src/main/resources/db/migration; Hibernate chỉ validate.
+  '''
+}
+
+Enum events_status {
+  DRAFT
+  PUBLISHED
+  UPCOMING
+  CANCELLED
+}
+
+Enum gateway_call_logs_direction {
+  OUTBOUND
+  INBOUND
+}
+
+Enum gateway_call_logs_ref_type {
+  ORDER
+  PAYMENT
+  REFUND
+}
+
+Enum idempotency_records_scope {
+  CHECKOUT
+  REFUND
+}
+
+Enum ledger_entries_direction {
+  DEBIT
+  CREDIT
+}
+
+Enum ledger_entries_account {
+  BANK_COLLECTION
+  PAYOUT_WALLET
+  CUSTOMER_LIABILITY
+  FEES
+}
+
+Enum orders_status {
+  PENDING_PAYMENT
+  PAID
+  REFUND_PROCESSING
+  REFUNDED
+  PARTIALLY_REFUNDED
+  REFUND_FAILED
+  EXPIRED
+  CANCELLED
+  MANUAL_REVIEW
+}
+
+Enum payments_status {
+  CREATED
+  PENDING
+  PAID
+  UNDERPAID
+  PAID_LATE
+  FAILED
+  EXPIRED
+}
+
+Enum refunds_status {
+  REQUESTED
+  AWAITING_FUNDS
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  MANUAL_REVIEW
+}
+
+Enum refunds_execution_method {
+  PAYOUT
+  NATIVE_REFUND
+  MANUAL_TRANSFER
+}
+
+Enum refunds_initiator {
+  USER
+  SYSTEM
+  ADMIN
+}
+
+Enum tickets_status {
+  ACTIVE
+  REFUND_PENDING
+  REFUNDED
+}
+
+Enum users_role {
+  CUSTOMER
+  ORGANIZER
+  ADMIN
+}
+
+Enum webhook_events_processing_result {
+  PROCESSED
+  DUPLICATE
+  IGNORED
+  REJECTED_SIGNATURE
+  FAILED
+}
+
+Table contact_messages {
+  id uuid [pk]
+  name varchar(200) [not null]
+  email varchar(200) [not null]
+  subject varchar(200)
+  message text [not null]
+  user_id uuid
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table events {
+  id uuid [pk]
+  slug varchar(200) [unique, not null]
+  name varchar(200) [not null]
+  category varchar(50)
+  starts_at timestamptz
+  ends_at timestamptz
+  refund_deadline_hours int [not null, default: 48]
+  status events_status [not null]
+  venue jsonb
+  cover_image_url text
+  cover_image_alt text
+  tagline text
+  description jsonb
+  schedule jsonb
+  featured bool [not null, default: false]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  organizer_id uuid
+  published_at timestamptz
+}
+
+Table gateway_call_logs {
+  id uuid [pk]
+  ref_type gateway_call_logs_ref_type
+  ref_id uuid [note: 'Không FK: log phải sống lâu hơn bản ghi nghiệp vụ']
+  direction gateway_call_logs_direction [not null]
+  endpoint text [not null]
+  request_masked jsonb [note: 'Đã che secret trước khi lưu']
+  response_raw jsonb
+  http_status int
+  duration_ms int
+  trace_id varchar(64)
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table idempotency_records {
+  id uuid [pk]
+  scope idempotency_records_scope [not null]
+  idem_key varchar(100) [not null]
+  request_hash varchar(64) [not null, note: 'Băm body để phát hiện cùng key khác body']
+  response_status int [not null]
+  response_body jsonb
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (idem_key, scope) [unique]
+  }
+}
+
+Table inventory {
+  ticket_tier_id uuid [pk]
+  available int [not null, note: 'CHECK >= 0. Dòng bị SELECT FOR UPDATE mỗi lần checkout']
+  version bigint [not null, default: 0, note: 'Khóa lạc quan']
+  updated_at timestamptz [not null, default: `now()`]
+
+  Note: 'Tách khỏi ticket_tiers vì đây là dòng bị khóa mỗi lần checkout; BTC sửa thông tin hạng vé không tranh khóa với người mua'
+}
+
+Table ledger_entries {
+  id uuid [pk]
+  account ledger_entries_account [not null]
+  direction ledger_entries_direction [not null]
+  amount bigint [not null, note: 'Luôn dương, dấu nằm ở direction']
+  ref_type varchar(20)
+  ref_id uuid [note: 'Không FK: sổ phải sống lâu hơn bản ghi nghiệp vụ']
+  occurred_at timestamptz [not null, default: `now()`]
+
+  Note: 'Sổ bút toán kép, CHỈ THÊM. Đơn PAID: nợ BANK_COLLECTION / có CUSTOMER_LIABILITY (+FEES). Refund SUCCEEDED: nợ CUSTOMER_LIABILITY / có PAYOUT_WALLET. Lệnh đang bay KHÔNG vào sổ'
+}
+
+Table order_items {
+  id uuid [pk]
+  order_id uuid [not null]
+  ticket_tier_id uuid [not null]
+  tier_name varchar(200) [not null, note: 'Chụp lại tên lúc mua, BTC đổi tên sau không ảnh hưởng']
+  quantity int [not null]
+  unit_price bigint [not null, note: 'Chụp lại giá lúc mua']
+
+  Note: 'Ý ĐỊNH mua (mấy vé hạng nào). Vé thật nằm ở tickets, chỉ sinh khi đơn đã PAID'
+}
+
+Table orders {
+  id uuid [pk]
+  order_code bigint [unique, not null, note: 'Số gửi PayOS: epoch-millis*1000 + random. PayOS chỉ nhận số']
+  event_id uuid [not null]
+  status orders_status [not null]
+  subtotal_amount bigint [not null, note: 'Tiền vé. Dashboard tính doanh thu trên cột này']
+  fee_amount bigint [not null, default: 0, note: 'Phí sàn, hiện luôn 0 vì hệ thống không chia tiền']
+  total_amount bigint [not null]
+  paid_amount bigint [not null, default: 0]
+  refunded_amount bigint [not null, default: 0]
+  customer_name varchar(200) [not null]
+  customer_email varchar(200) [not null]
+  customer_phone varchar(30)
+  expires_at timestamptz [not null]
+  idempotency_key varchar(100) [unique, note: 'Chặn bấm Thanh toán hai lần tạo hai đơn']
+  version bigint [not null, default: 0, note: 'Khóa lạc quan']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  user_id uuid
+  paid_at timestamptz
+}
+
+Table organizers {
+  id uuid [pk]
+  user_id uuid [unique]
+  slug varchar(200) [unique, not null]
+  name varchar(200) [not null]
+  description text
+  logo_url text
+  cover_url text
+  website text
+  city varchar(100)
+  contact_email varchar(200)
+  contact_phone varchar(30)
+  verified bool [not null, default: false]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table password_reset_tokens {
+  id uuid [pk]
+  user_id uuid [not null]
+  token_hash varchar(64) [unique, not null]
+  expires_at timestamptz [not null]
+  used_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table payments {
+  id uuid [pk]
+  order_id uuid [not null]
+  provider varchar(20) [not null]
+  provider_payment_id varchar(100) [note: 'UNIQUE cùng provider']
+  payment_link_id varchar(100)
+  checkout_url text
+  provider_transaction_ref varchar(100)
+  amount bigint [not null]
+  status payments_status [not null]
+  payer_bank_bin varchar(20) [note: 'BIN Napas 6 số; NULL khi PayOS trả mã CITAD 8 số hoặc khách trả bằng ví']
+  payer_account_number varchar(255) [note: 'Nguồn để hoàn về đúng tài khoản đã trả']
+  paid_at timestamptz
+  raw_webhook_payload jsonb
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (provider, provider_payment_id) [unique]
+  }
+}
+
+Table refresh_tokens {
+  id uuid [pk]
+  user_id uuid [not null]
+  token_hash varchar(64) [unique, not null]
+  expires_at timestamptz [not null]
+  revoked_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table refund_inquiries {
+  id uuid [pk]
+  refund_id uuid [not null]
+  message text [not null]
+  created_at timestamptz [not null, default: `now()`]
+  resolved_at timestamptz
+
+  Note: 'Chưa dùng: chưa có entity JPA nào map tới'
+}
+
+Table refund_items {
+  id uuid [pk]
+  refund_id uuid [not null]
+  ticket_id uuid [not null]
+  amount bigint [not null]
+
+  indexes {
+    (refund_id, ticket_id) [unique]
+  }
+}
+
+Table refunds {
+  id uuid [pk]
+  order_id uuid [not null]
+  payment_id uuid
+  original_payment_transaction_id varchar(100)
+  amount bigint [not null]
+  currency varchar(3) [not null, default: 'VND']
+  status refunds_status [not null]
+  execution_method refunds_execution_method
+  initiator refunds_initiator [not null]
+  provider varchar(20)
+  provider_refund_id varchar(100)
+  idempotency_key varchar(100) [unique, note: 'RF-<refundId>-<attempt>. Thứ chặn chi tiền hai lần']
+  attempt int [not null, default: 1]
+  failure_code varchar(50)
+  failure_reason text
+  destination_bin varchar(20)
+  destination_account varchar(255)
+  destination_is_payer bool [note: 'false = đích khác tài khoản đã trả, phải BTC duyệt']
+  reason text
+  submitted_at timestamptz
+  last_polled_at timestamptz
+  queued_since timestamptz [note: 'Xếp hàng khi ví chi không đủ tiền']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (provider, provider_refund_id) [unique]
+  }
+}
+
+Table ticket_tiers {
+  id uuid [pk]
+  event_id uuid [not null]
+  name varchar(200) [not null]
+  description text
+  price bigint [not null]
+  total_quantity int [not null]
+  max_per_order int [not null, default: 6]
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table tickets {
+  id uuid [pk]
+  order_id uuid [not null]
+  ticket_tier_id uuid [not null]
+  price bigint [not null]
+  ticket_code varchar(100) [unique, not null, note: 'Nội dung mã QR']
+  status tickets_status [not null]
+  issued_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  owner_id uuid
+}
+
+Table users {
+  id uuid [pk]
+  full_name varchar(200) [not null]
+  email varchar(200) [unique, not null]
+  password_hash varchar(100) [not null]
+  role users_role [not null]
+  created_at timestamptz [not null, default: `now()`]
+  phone varchar(30)
+  avatar_url text
+  bio text
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table wallet_snapshots {
+  id uuid [pk]
+  taken_at timestamptz [not null, default: `now()`]
+  balance bigint [not null]
+  committed bigint [not null]
+  available bigint [not null]
+  liability bigint [not null]
+  coverage numeric
+
+  Note: 'Chưa dùng: chưa có entity JPA nào map tới'
+}
+
+Table webhook_events {
+  id uuid [pk]
+  provider varchar(20) [not null]
+  event_id varchar(200) [not null, note: 'UNIQUE cùng provider — thứ chặn webhook trùng']
+  event_type varchar(50)
+  raw_payload jsonb
+  signature_valid bool [not null]
+  processing_result webhook_events_processing_result
+  received_at timestamptz [not null, default: `now()`]
+  processed_at timestamptz
+
+  indexes {
+    (event_id, provider) [unique]
+  }
+}
+
+Ref: events.organizer_id > organizers.id
+Ref: inventory.ticket_tier_id > ticket_tiers.id
+Ref: order_items.order_id > orders.id [delete: cascade]
+Ref: order_items.ticket_tier_id > ticket_tiers.id
+Ref: orders.event_id > events.id
+Ref: orders.user_id > users.id
+Ref: organizers.user_id > users.id
+Ref: password_reset_tokens.user_id > users.id
+Ref: payments.order_id > orders.id
+Ref: refresh_tokens.user_id > users.id
+Ref: refund_inquiries.refund_id > refunds.id
+Ref: refund_items.refund_id > refunds.id [delete: cascade]
+Ref: refund_items.ticket_id > tickets.id
+Ref: refunds.order_id > orders.id
+Ref: refunds.payment_id > payments.id
+Ref: ticket_tiers.event_id > events.id
+Ref: tickets.order_id > orders.id
+Ref: tickets.owner_id > users.id
+Ref: tickets.ticket_tier_id > ticket_tiers.id
+
+// contact_messages.user_id có cột nhưng KHÔNG có ràng buộc FK (tham chiếu mềm),
+// nên xóa user không vướng tin nhắn cũ. Không khai Ref để sơ đồ không nói sai.
+
+// Tài khoản và phiên đăng nhập
+TableGroup identity {
+  users
+  organizers
+  refresh_tokens
+  password_reset_tokens
+  contact_messages
+}
+
+// Sự kiện, hạng vé và tồn kho
+TableGroup catalog {
+  events
+  ticket_tiers
+  inventory
+}
+
+// Đơn hàng và vé đã cấp
+TableGroup ordering {
+  orders
+  order_items
+  tickets
+}
+
+// Thanh toán và hoàn tiền
+TableGroup money {
+  payments
+  refunds
+  refund_items
+  refund_inquiries
+}
+
+// Audit, idempotency, sổ tiền — không có FK, tham chiếu mềm qua ref_type + ref_id
+TableGroup infra {
+  webhook_events
+  gateway_call_logs
+  idempotency_records
+  ledger_entries
+  wallet_snapshots
+}

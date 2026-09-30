@@ -11,3 +11,9 @@ app:
     client-id: test-client-id
     api-key: test-api-key
     checksum-key: test-checksum-key
+  mail:
+    # Tắt SMTP trong test, cùng lý do với PayOS ở trên: test không được gọi ra ngoài.
+    # Quan trọng vì IdentityFlowTests.forgotAndResetPassword() gọi /auth/forgot-password 3 lần,
+    # và .env (có MY_EMAIL thật) cũng được load khi chạy test -> nếu bật thì mỗi lần test là gửi mail thật.
+    # enabled=false: Mailer chỉ log nội dung mail, không mở kết nối nào.
+    enabled: false

@@ -5,9 +5,13 @@ ERD sinh từ schema thật của Postgres (Flyway `V1`–`V6`); state machine v
 - [1–6. ERD theo nhóm bảng](#1-toàn-cảnh)
 - [7. State machine: Order](#7-state-machine-order)
 - [8. State machine: Payment](#8-state-machine-payment)
-- [9. Luồng tạo đơn và link thanh toán](#9-luồng-tạo-đơn-và-link-thanh-toán)
-- [10. Luồng webhook thanh toán](#10-luồng-webhook-thanh-toán)
-- [11. Luồng hết hạn và đối soát](#11-luồng-hết-hạn-và-đối-soát)
+- [9. Toàn cảnh: từ bấm thanh toán tới khi có vé](#9-toàn-cảnh-từ-bấm-thanh-toán-tới-khi-có-vé)
+- [10. Luồng tạo đơn và link thanh toán](#10-luồng-tạo-đơn-và-link-thanh-toán)
+- [11. Luồng webhook thanh toán](#11-luồng-webhook-thanh-toán)
+- [12. Luồng hết hạn và đối soát](#12-luồng-hết-hạn-và-đối-soát)
+- [13. Toàn cảnh: hoàn tiền](#13-toàn-cảnh-hoàn-tiền)
+
+Cần chỉnh sơ đồ bằng chuột hoặc xuất ảnh? Dán [`schema.dbml`](schema.dbml) vào <https://dbdiagram.io/d>.
 
 > Xem sơ đồ: GitHub, IntelliJ và VS Code (extension Markdown Preview Mermaid) đều render trực tiếp.
 
@@ -423,6 +427,25 @@ bút toán cho đơn seed, nếu không thì `paidIn = 0` và invariant tự t�
 
 Schema do Flyway quản lý ở `src/main/resources/db/migration`; Hibernate chỉ `validate`, không tự sửa bảng.
 
+## Sinh lại schema.dbml
+
+[`schema.dbml`](schema.dbml) sinh từ `information_schema` của DB đang chạy, **không viết tay**. Đổi schema thì
+chạy lại Flyway rồi sinh lại, đừng sửa file:
+
+```bash
+set -a; . ./.env; set +a
+psql "${DB_URL#jdbc:}" -U "$DB_USERNAME" -t -A -F'|' -c "..."   # xem lịch sử lệnh trong git log
+```
+
+Sau khi sinh, kiểm bằng parser chính thức của dbdiagram thay vì nhìn mắt:
+
+```bash
+npm i @dbml/core       # rồi Parser().parse(src, 'dbml') và ModelExporter.export(db, 'postgres')
+```
+
+Dựng DB tạm từ SQL export được rồi so `information_schema` với DB thật: bảng, cột, khóa ngoại, NOT NULL
+phải trùng khớp tuyệt đối.
+
 ---
 
 ## 7. State machine: Order
@@ -505,7 +528,66 @@ stateDiagram-v2
 
 ---
 
-## 9. Luồng tạo đơn và link thanh toán
+## 9. Toàn cảnh: từ bấm thanh toán tới khi có vé
+
+Mục này nhìn xuyên cả bốn phía. Chi tiết bên trong BE ở [§10](#10-luồng-tạo-đơn-và-link-thanh-toán)
+và [§11](#11-luồng-webhook-thanh-toán).
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor K as Khách
+    participant FE as FE React
+    participant BE as Backend
+    participant DB as Postgres
+    participant G as PayOS
+
+    K->>FE: Chọn vé, điền thông tin, bấm Thanh toán
+    FE->>BE: POST /api/v1/orders + Idempotency-Key
+    Note right of FE: key do client sinh mỗi lần bấm<br/>bấm hai lần vẫn ra MỘT đơn
+
+    BE->>DB: TX1 khóa kho, trừ vé, tạo đơn PENDING_PAYMENT
+    BE->>G: createPaymentLink (NGOÀI transaction)
+    G-->>BE: checkoutUrl
+    BE->>DB: TX2 lưu payment PENDING
+    BE-->>FE: 201 kèm checkoutUrl
+
+    FE->>FE: nhớ orderId vào localStorage
+    FE->>K: chuyển trang sang PayOS
+    K->>G: quét QR, chuyển khoản
+
+    par PayOS đưa khách quay lại
+        G->>K: redirect /checkout/return?orderId=...
+        K->>FE: mở trang chờ kết quả
+        loop mỗi 2 giây, tối đa 90 giây
+            FE->>BE: GET /api/v1/orders/{id}
+            BE-->>FE: status hiện tại
+        end
+    and PayOS gọi webhook cho BE
+        G->>BE: POST /webhooks/payos/payment
+        BE->>BE: verify HMAC trên raw body
+        BE->>DB: lưu webhook_events, UNIQUE chặn trùng
+        BE->>DB: TX khóa đơn, đơn PAID, cấp vé, ghi sổ ledger
+        BE-->>G: 200
+    end
+
+    FE->>K: thấy PAID thì sang /checkout/success
+```
+
+**Hai nhánh trong `par` chạy độc lập và có thể về theo thứ tự bất kỳ.** Trang kết quả **không tin** cú
+redirect của PayOS — nó hỏi lại BE cho tới khi đơn chốt. Khách đóng trình duyệt ngay sau khi chuyển khoản
+thì webhook vẫn cấp vé bình thường.
+
+**Webhook rớt thì đơn không mất.** `OrderExpiryJob` mỗi 60 giây hỏi lại PayOS trước khi cho đơn hết hạn,
+`PaymentReconcileJob` mỗi 5 phút đối chiếu đơn sắp hết hạn — xem [§12](#12-luồng-hết-hạn-và-đối-soát).
+Cả hai đi chung đường `record()` với webhook nên kết quả y hệt.
+
+**Các mốc thời gian:** giữ vé `app.checkout.order-ttl` = 15 phút; trang chờ kết quả bỏ cuộc sau 90 giây
+rồi chuyển sang trang đơn hàng (đơn vẫn sống, vẫn trả tiền tiếp được).
+
+---
+
+## 10. Luồng tạo đơn và link thanh toán
 
 `POST /api/v1/orders` — `CheckoutServiceImpl.checkout()`.
 
@@ -565,7 +647,7 @@ sequenceDiagram
 
 ---
 
-## 10. Luồng webhook thanh toán
+## 11. Luồng webhook thanh toán
 
 `POST /webhooks/payos/payment` — `PaymentServiceImpl.handleWebhook()`.
 
@@ -629,7 +711,7 @@ Trừ lỗi chữ ký (401), mọi trường hợp còn lại đều trả **200
 
 ---
 
-## 11. Luồng hết hạn và đối soát
+## 12. Luồng hết hạn và đối soát
 
 Đây là lý do một đơn có thể thành `PAID` mà **không** có webhook nào về.
 
@@ -663,3 +745,80 @@ sequenceDiagram
 `PaymentReconcileJob` chạy mỗi 5 phút cũng theo đúng đường này nhưng cho đơn **sắp** hết hạn, để phát hiện sớm khi webhook rớt.
 
 Cả hai job đều đi qua `record()` giống hệt webhook, nên kết quả của một đơn không phụ thuộc vào việc nó được xử lý bằng webhook hay bằng poll.
+
+---
+
+## 13. Toàn cảnh: hoàn tiền
+
+Nhìn xuyên cả năm phía. Điểm rẽ nhánh nằm ở **số tài khoản nhận**, không phải ở việc client gửi gì.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor K as Khách
+    participant FE as FE React
+    participant BE as Backend
+    participant DB as Postgres
+    actor BTC as Ban tổ chức
+    participant G as PayOS
+
+    K->>FE: Trang đơn, bấm Yêu cầu hoàn vé
+    FE->>FE: điền sẵn ngân hàng + số TK từ order.payment
+    Note right of FE: PayOS trả mã CITAD 8 số<br/>thì thiếu ngân hàng, khách tự chọn
+
+    K->>FE: chọn vé, xác nhận tài khoản nhận
+    FE->>BE: POST /orders/{id}/refunds + Idempotency-Key
+
+    BE->>DB: TX1 khóa đơn, kiểm hạn hủy, vé REFUND_PENDING,<br/>đơn REFUND_PROCESSING, tạo refund REQUESTED
+    BE-->>FE: 202 kèm trạng thái refund
+
+    alt Số TK TRÙNG tài khoản đã thanh toán
+        Note over BE: destinationIsPayer = true, tiền về chỗ cũ
+        BE->>G: hỏi số dư ví chi
+        alt Ví đủ tiền
+            BE->>DB: TX_a chốt key RF-refundId-attempt
+            BE->>G: submitRefund (NGOÀI transaction)
+            BE->>DB: TX_b refund PROCESSING
+            loop RefundPollJob mỗi 10 giây
+                BE->>G: getRefundStatus
+            end
+        else Ví thiếu tiền
+            BE->>DB: refund AWAITING_FUNDS, xếp hàng
+            Note over BE: RefundQueueJob mỗi 60 giây<br/>gửi lại theo thứ tự vào hàng
+        end
+    else Số TK KHÁC
+        Note over BE: destinationIsPayer = false, không tự chi
+        BE->>DB: refund MANUAL_REVIEW
+        BTC->>BE: GET /organizer/refunds?status=MANUAL_REVIEW
+        BTC->>BE: GET /organizer/refunds/{id}/instruction
+        BE-->>BTC: VietQR + tên ngân hàng + số tiền
+        BTC->>BTC: quét QR, chuyển khoản bằng app ngân hàng
+        BTC->>BE: POST /organizer/refunds/{id}/resolve SUCCEEDED
+    end
+
+    BE->>DB: RefundResultHandler: vé REFUNDED, cộng kho,<br/>đơn REFUNDED hoặc PARTIALLY_REFUNDED, ghi sổ ledger
+
+    loop FE poll khi còn refund đang chạy
+        FE->>BE: GET /orders/{id}/refunds
+        BE-->>FE: trạng thái hiện tại
+    end
+    FE->>K: hiện Đã hoàn tiền
+```
+
+**Một cửa duy nhất chốt kết quả.** Poll, webhook và BTC bấm duyệt đều đổ vào `RefundResultHandler`. Nó
+`UPDATE ... WHERE status = 'PROCESSING'` rồi mới cộng kho, nên webhook trùng, poll trùng hay BTC bấm hai lần
+đều **không** cộng kho lần hai.
+
+**Chi hai lần bị chặn ở key.** Mỗi lần thử có key `RF-<refundId>-<attempt>` chốt trong TX trước khi gọi
+provider. Timeout thì **giữ nguyên key** và tra lại (`RefundRecoveryJob` mỗi 60 giây), không sinh key mới —
+sinh key mới là chi hai lần.
+
+**Tiền chưa đi thì chưa vào sổ.** `ledger_entries` chỉ ghi khi refund `SUCCEEDED`. Phần đang bay đếm từ bảng
+`refunds`, xem [phần bút toán ở Ghi chú](#ghi-chú).
+
+**Ví chi hỏng không làm kẹt khách.** `payout-enabled=false` hoặc PayOS không trả lời thì refund sang
+`MANUAL_REVIEW` kèm `PAYOUT_DISABLED` / `PAYOUT_UNAVAILABLE` để BTC chuyển tay — chứ không nằm im ở
+`REQUESTED` và cũng không ném 500 về cho khách.
+
+**Các mốc thời gian:** poll 10 giây, hàng chờ 60 giây, tra lệnh kẹt 60 giây, quá 30 phút provider chưa chốt
+thì `MANUAL_REVIEW`, nằm hàng chờ quá 24 giờ cũng vậy.

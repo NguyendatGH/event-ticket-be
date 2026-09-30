@@ -37,8 +37,6 @@ public interface RefundRepository extends JpaRepository<Refund, UUID> {
 
     Optional<Refund> findByIdempotencyKey(String idempotencyKey);
 
-    List<Refund> findAllByStatusInOrderByCreatedAtDesc(Collection<RefundStatus> statuses);
-
     /** Refund của các sự kiện thuộc một BTC. Tiền nằm ở tài khoản BTC nên chính họ duyệt, không phải admin. */
     @Query(value = """
             select r.* from refunds r

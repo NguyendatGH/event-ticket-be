@@ -100,6 +100,17 @@ public class Refund {
 
     private String reason;
 
+    /**
+     * Email khách muốn nhận thông báo về CHÍNH yêu cầu hoàn vé này (hỏi lúc tạo yêu cầu, xem
+     * {@code CreateRefundRequest.contactEmail}). Có thể khác {@code orders.customer_email} lúc mua.
+     *
+     * <p>Luôn được lưu ở dạng đã chuẩn hóa (trim + chữ thường) — RefundService chuẩn hóa trước khi gọi
+     * {@link #request}. Có thể null với refund tạo TRƯỚC migration V7 (cột nullable, không backfill được),
+     * nên nơi nào đọc cột này cũng phải xử lý null thay vì tin là luôn có.
+     */
+    @Column(name = "contact_email", length = 200)
+    private String contactEmail;
+
     @Column(name = "submitted_at")
     private Instant submittedAt;
 
@@ -122,8 +133,13 @@ public class Refund {
     @JoinColumn(name = "refund_id", nullable = false)
     private List<RefundItem> items = new ArrayList<>();
 
+    /**
+     * @param contactEmail email liên hệ của khách, ĐÃ chuẩn hóa sẵn bởi nơi gọi (RefundService.open).
+     *                     Nhận nguyên xi chứ không tự chuẩn hóa ở đây: entity domain không nên phụ thuộc
+     *                     lên tầng application chỉ để gọi {@code AuthService.normalizeEmail}.
+     */
     public static Refund request(UUID orderId, Payment payment, List<RefundItem> items, long amount,
-                                 RefundInitiator initiator, String reason,
+                                 RefundInitiator initiator, String reason, String contactEmail,
                                  String destinationBin, String destinationAccount, boolean destinationIsPayer) {
         if (items.isEmpty()) throw DomainException.badRequest("REFUND_EMPTY", "Chưa chọn vé để hoàn");
         if (amount <= 0) throw DomainException.badRequest("REFUND_AMOUNT_INVALID", "Số tiền hoàn phải lớn hơn 0");
@@ -140,6 +156,7 @@ public class Refund {
         r.provider = payment.getProvider();
         r.attempt = 0;
         r.reason = reason;
+        r.contactEmail = contactEmail;
         r.destinationBin = destinationBin;
         r.destinationAccount = destinationAccount;
         r.destinationIsPayer = destinationIsPayer;
