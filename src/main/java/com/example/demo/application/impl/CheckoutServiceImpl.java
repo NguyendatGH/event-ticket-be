@@ -1,45 +1,5 @@
 package com.example.demo.application.impl;
 
-import com.example.demo.application.CheckoutService;
-import com.example.demo.application.BuyerWalletService;
-import com.example.demo.application.GatewayAudit;
-import com.example.demo.application.IdempotencyService;
-import com.example.demo.application.LedgerService;
-import com.example.demo.application.OrderFulfilment;
-import com.example.demo.application.OrderQueries;
-import com.example.demo.application.PaymentMethodsService;
-import com.example.demo.application.PaymentGatewayRegistry;
-import com.example.demo.application.SellerWalletService;
-import com.example.demo.application.dto.CreateOrderRequest;
-import com.example.demo.application.dto.OrderResponse;
-
-import com.example.demo.domain.common.DomainException;
-import com.example.demo.domain.common.LogContext;
-import com.example.demo.domain.event.Event;
-import com.example.demo.domain.event.TicketTier;
-import com.example.demo.domain.idempotency.IdempotencyScope;
-import com.example.demo.domain.inventory.Inventory;
-import com.example.demo.domain.order.Order;
-import com.example.demo.domain.order.OrderItem;
-import com.example.demo.domain.payment.CreatePaymentCommand;
-import com.example.demo.domain.payment.MerchantGateway;
-import com.example.demo.domain.payment.Payment;
-import com.example.demo.domain.payment.PaymentGatewayPort;
-import com.example.demo.domain.payment.PaymentLink;
-import com.example.demo.domain.payment.PaymentStatus;
-import com.example.demo.infrastructure.persistence.EventRepository;
-import com.example.demo.infrastructure.persistence.InventoryRepository;
-import com.example.demo.infrastructure.persistence.OrderRepository;
-import com.example.demo.infrastructure.persistence.PaymentRepository;
-import com.example.demo.infrastructure.persistence.TicketTierRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionTemplate;
-
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -49,6 +9,48 @@ import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import com.example.demo.application.BuyerWalletService;
+import com.example.demo.application.CheckoutService;
+import com.example.demo.application.GatewayAudit;
+import com.example.demo.application.IdempotencyService;
+import com.example.demo.application.LedgerService;
+import com.example.demo.application.OrderFulfilment;
+import com.example.demo.application.OrderQueries;
+import com.example.demo.application.PaymentGatewayRegistry;
+import com.example.demo.application.PaymentMethodsService;
+import com.example.demo.application.PaymentService;
+import com.example.demo.application.SellerWalletService;
+import com.example.demo.application.dto.CreateOrderRequest;
+import com.example.demo.application.dto.OrderResponse;
+import com.example.demo.domain.common.DomainException;
+import com.example.demo.domain.common.LogContext;
+import com.example.demo.domain.event.Event;
+import com.example.demo.domain.event.TicketTier;
+import com.example.demo.domain.idempotency.IdempotencyScope;
+import com.example.demo.domain.inventory.Inventory;
+import com.example.demo.domain.order.Order;
+import com.example.demo.domain.order.OrderItem;
+import com.example.demo.domain.order.OrderStatus;
+import com.example.demo.domain.payment.CreatePaymentCommand;
+import com.example.demo.domain.payment.Payment;
+import com.example.demo.domain.payment.PaymentGatewayPort;
+import com.example.demo.domain.payment.PaymentLink;
+import com.example.demo.domain.payment.PaymentStatus;
+import com.example.demo.infrastructure.persistence.EventRepository;
+import com.example.demo.infrastructure.persistence.InventoryRepository;
+import com.example.demo.infrastructure.persistence.OrderRepository;
+import com.example.demo.infrastructure.persistence.PaymentRepository;
+import com.example.demo.infrastructure.persistence.TicketTierRepository;
 
 @Service
 public class CheckoutServiceImpl implements CheckoutService {
@@ -65,6 +67,7 @@ public class CheckoutServiceImpl implements CheckoutService {
     private final IdempotencyService idempotency;
     private final PaymentGatewayRegistry gateways;
     private final PaymentMethodsService paymentMethods;
+    private final PaymentService paymentService;
     private final BuyerWalletService buyerWallet;
     private final SellerWalletService sellerWallet;
     private final LedgerService ledger;
@@ -74,12 +77,14 @@ public class CheckoutServiceImpl implements CheckoutService {
     private final long fee;
     private final String returnUrl;
     private final String cancelUrl;
+    
 
     public CheckoutServiceImpl(EventRepository events, TicketTierRepository tiers, InventoryRepository inventory,
                                OrderRepository orders, PaymentRepository payments, OrderFulfilment fulfilment,
                                OrderQueries orderQueries, IdempotencyService idempotency,
                                GatewayAudit audit, TransactionTemplate tx,
                                PaymentGatewayRegistry gateways, PaymentMethodsService paymentMethods,
+                               @Lazy PaymentService paymentService,
                                BuyerWalletService buyerWallet, SellerWalletService sellerWallet, LedgerService ledger,
                                @Value("${app.checkout.order-ttl}") Duration orderTtl,
                                @Value("${app.checkout.fee}") long fee,
@@ -95,6 +100,7 @@ public class CheckoutServiceImpl implements CheckoutService {
         this.idempotency = idempotency;
         this.gateways = gateways;
         this.paymentMethods = paymentMethods;
+        this.paymentService = paymentService;
         this.buyerWallet = buyerWallet;
         this.sellerWallet = sellerWallet;
         this.ledger = ledger;
@@ -124,6 +130,9 @@ public class CheckoutServiceImpl implements CheckoutService {
         if (!paymentMethod.equals("WALLET") && !merchantSettings.supports(paymentMethod)) {
             throw new DomainException(HttpStatus.CONFLICT, "PAYMENT_METHOD_NOT_ENABLED", "Phương thức thanh toán này chưa được merchant bật");
         }
+        if(userId != null) cancelPendingOrders(userId, userId);
+
+    
         Order order = tx.execute(s -> reserveTiers(req, idempotencyKey, userId));
         Event event = events.findById(order.getEventId()).orElseThrow();
         if (paymentMethod.equals("WALLET")) return payWithWallet(order, event, userId);
@@ -138,11 +147,12 @@ public class CheckoutServiceImpl implements CheckoutService {
             try {
                 log.info("Sending create payment request");
                 PaymentLink link = gateway.createPaymentLink(command);
-                LogContext.trade(link.gatewayMerchantNo(), link.gatewayTerminalId(), link.providerPaymentId());
-                log.info("Payment link created: {}", link);
+                LogContext.trade(link.gatewayMerchantNo(), null, link.providerPaymentId());
+               log.info("Payment link created: providerPaymentId={} checkoutUrl={} returnUrl={} cancelUrl={}",
+        link.providerPaymentId(), link.checkoutUrl(), command.returnUrl(), command.cancelUrl());
                 audit.record(order.getId(), "OUTBOUND", "createPaymentLink", command.masked(), link, 200, System.currentTimeMillis() - startedAt);
                 return tx.execute(s -> {
-                    Payment payment = payments.save(Payment.pending(order.getId(), gateway.provider(), link, order.getTotalAmount(), link.gatewayMerchantNo(), link.gatewayTerminalId()));
+                    Payment payment = payments.save(Payment.pending(order.getId(), gateway.provider(), link, order.getTotalAmount(), link.gatewayMerchantNo()));
                     return OrderResponse.from(orders.findById(order.getId()).orElseThrow(), event, List.of(), payment);
                 });
             } catch (RuntimeException ex) {
@@ -244,6 +254,18 @@ public class CheckoutServiceImpl implements CheckoutService {
         return tx.execute(s -> orderQueries.toResponse(orders.findById(order.getId()).orElseThrow()));
     }
 
+
+    private void cancelPendingOrders(UUID userId, UUID eventId){
+        for (Order o: orders.findAllByUserIdAndEventIdAndStatus(userId, eventId, OrderStatus.PENDING_PAYMENT)){
+            try{
+                paymentService.cancelOrder(userId, o.getEventId());
+            } catch (DomainException ex) {
+                    log.info("Keep order: {}: {}", o.getOrderCode(), ex.getCode());
+            } catch (RuntimeException ex) {
+                    log.warn("Cannot cancel old order {}: {}", o.getOrderCode(), ex.toString());
+            }
+        }
+    }
 
     @Override
     @Transactional

@@ -14,7 +14,6 @@ public interface OrganizerGatewayBindingRepository extends JpaRepository<Organiz
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<OrganizerGatewayBinding> findWithLockByOrganizerIdAndProvider(UUID organizerId, String provider);
     Optional<OrganizerGatewayBinding> findByGatewayMerchantNoAndProvider(String merchantNo, String provider);
-    Optional<OrganizerGatewayBinding> findByGatewayTerminalIdAndProvider(String terminalId, String provider);
 
     Optional<OrganizerGatewayBinding> findFirstByProviderAndStatusOrderByCreatedAtAsc(
             String provider, OrganizerGatewayBinding.Status status);
