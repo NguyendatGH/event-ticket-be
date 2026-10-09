@@ -26,9 +26,7 @@ public class GatewayProvisioningJob {
         MDC.put("trace_id", UUID.randomUUID().toString());
         try {
             int provisioned = provisioning.provisionMissing();
-            int synced = provisioning.syncPendingSettlements();
-            if (provisioned + synced > 0)
-                log.info("GatewayProvisioningJob: cấp phát {} BTC, đẩy {} tài khoản nhận tiền", provisioned, synced);
+            if (provisioned > 0) log.info("GatewayProvisioningJob: cấp phát {} BTC", provisioned);
         } catch (RuntimeException ex) {
             log.error("GatewayProvisioningJob lỗi: {}", ex.toString(), ex);
         } finally {

@@ -26,13 +26,14 @@ class BankSimPaymentGatewayTest {
     private static final String SECRET = "gwsec_test";
 
     private final GatewayCredentialResolver credentials = mock(GatewayCredentialResolver.class);
+    private final BankSimMerchantClient merchantApi = mock(BankSimMerchantClient.class);
     private final BankSimPaymentGateway gateway =
-            new BankSimPaymentGateway("http://localhost:1", credentials, new JsonMapper());
+            new BankSimPaymentGateway("http://localhost:1", credentials, merchantApi, new JsonMapper());
 
     @BeforeEach
     void merchantOwnsEveryPayment() {
         when(credentials.forProviderPaymentId(any()))
-                .thenReturn(new GatewayCredentialResolver.GatewayMerchantContext("MerNo000001", "TerNo000001", SECRET));
+                .thenReturn(new GatewayCredentialResolver.GatewayMerchantContext("MerNo000001", SECRET));
     }
 
     private PaymentEvent parse(String body) {
@@ -113,10 +114,10 @@ class BankSimPaymentGatewayTest {
         server.start();
         try {
             when(credentials.forRefundReference("ref-2"))
-                    .thenReturn(new GatewayCredentialResolver.GatewayMerchantContext("MerNo000001", "TerNo000001", SECRET));
+                    .thenReturn(new GatewayCredentialResolver.GatewayMerchantContext("MerNo000001", SECRET));
             when(credentials.providerPaymentIdForRefundReference("ref-2")).thenReturn(java.util.Optional.of("TradeNo000042"));
             BankSimPaymentGateway real = new BankSimPaymentGateway(
-                    "http://localhost:" + server.getAddress().getPort(), credentials, new JsonMapper());
+                    "http://localhost:" + server.getAddress().getPort(), credentials, merchantApi, new JsonMapper());
 
             var result = real.submitRefund(new RefundCommand("ref-2", 100_000, "Hoan ve 2", "970436", "0123456789012"));
 
@@ -128,40 +129,74 @@ class BankSimPaymentGatewayTest {
     }
 
     @Test
-    void eachPaymentGoesThroughTheChannelThatOwnsItsMethod() throws Exception {
-        Map<String, String> methodsByTerminal = Map.of("TerNoQR", "[\"QR\"]", "TerNoCARD", "[\"CARD\"]", "TerNoDEFAULT", "[\"CARD\",\"QR\"]");
-        java.util.List<String> paidThrough = new java.util.concurrent.CopyOnWriteArrayList<>();
+    void paymentIsCreatedWithMerchantCredentialsOnlyAndGatewayPicksTheTerminal() throws Exception {
+        java.util.List<String> terminalHeaders = new java.util.concurrent.CopyOnWriteArrayList<>();
+        java.util.List<String> merchantHeaders = new java.util.concurrent.CopyOnWriteArrayList<>();
+        java.util.List<String> bodies = new java.util.concurrent.CopyOnWriteArrayList<>();
         HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
-        server.createContext("/api/v1/gateway/terminal", exchange -> respond(exchange, """
-                {"terminalId":"%s","paymentMethods":%s}""".formatted(exchange.getRequestHeaders().getFirst("X-Terminal-Id"),
-                methodsByTerminal.get(exchange.getRequestHeaders().getFirst("X-Terminal-Id")))));
         server.createContext("/api/v1/gateway/payments", exchange -> {
-            paidThrough.add(exchange.getRequestHeaders().getFirst("X-Terminal-Id"));
+            terminalHeaders.add(String.valueOf(exchange.getRequestHeaders().getFirst("X-Terminal-Id")));
+            merchantHeaders.add(exchange.getRequestHeaders().getFirst("X-Merchant-No") + "/"
+                    + exchange.getRequestHeaders().getFirst("X-Merchant-Secret"));
+            bodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             respond(exchange, """
                     {"providerPaymentId":"TradeNo000001","checkoutUrl":"http://gateway/checkout","qrCode":null}""");
         });
         server.start();
         try {
-            java.util.UUID twoChannels = java.util.UUID.randomUUID();
-            java.util.UUID noChannel = java.util.UUID.randomUUID();
-            var binding = new GatewayCredentialResolver.GatewayMerchantContext("MerNo000001", "TerNoDEFAULT", SECRET);
-            when(credentials.forOrganizer(any())).thenReturn(binding);
-            when(credentials.channelTerminals(twoChannels)).thenReturn(java.util.List.of("TerNoQR", "TerNoCARD"));
-            when(credentials.channelTerminals(noChannel)).thenReturn(java.util.List.of());
+            when(credentials.forOrganizer(any()))
+                    .thenReturn(new GatewayCredentialResolver.GatewayMerchantContext("MerNo000001", SECRET));
             BankSimPaymentGateway real = new BankSimPaymentGateway(
-                    "http://localhost:" + server.getAddress().getPort(), credentials, new JsonMapper());
+                    "http://localhost:" + server.getAddress().getPort(), credentials, merchantApi, new JsonMapper());
 
-            assertEquals(java.util.Set.of("QR", "CARD"), real.supportedPaymentMethods(twoChannels).orElseThrow());
-            var card = real.createPaymentLink(payment(twoChannels, "CARD"));
-            var qr = real.createPaymentLink(payment(twoChannels, "QR"));
-            real.createPaymentLink(payment(noChannel, "QR"));
+            var qr = real.createPaymentLink(payment(java.util.UUID.randomUUID(), "QR"));
+            real.createPaymentLink(payment(java.util.UUID.randomUUID(), "GOOGLE_PAY"));
 
-            assertEquals(java.util.List.of("TerNoCARD", "TerNoQR", "TerNoDEFAULT"), paidThrough);
-            assertEquals("TerNoCARD", card.gatewayTerminalId(), "lưu đúng terminal để tra trạng thái / hoàn tiền về sau");
-            assertEquals("TerNoQR", qr.gatewayTerminalId());
+            assertEquals(java.util.List.of("null", "null"), terminalHeaders, "Encore không gửi terminal: gateway tự chọn theo phương thức");
+            assertEquals(java.util.List.of("MerNo000001/" + SECRET, "MerNo000001/" + SECRET), merchantHeaders);
+            assertTrue(bodies.get(0).contains("\"paymentMethod\":\"QR\""), bodies.get(0));
+            assertTrue(bodies.get(1).contains("\"paymentMethod\":\"GOOGLE_PAY\""), bodies.get(1));
+            assertEquals("MerNo000001", qr.gatewayMerchantNo(), "lưu merchant đã thu để tra trạng thái / hoàn tiền về sau");
         } finally {
             server.stop(0);
         }
+    }
+
+    @Test
+    void customerMethodsComeFromTheGatewayAndAreCached() {
+        java.util.UUID organizer = java.util.UUID.randomUUID();
+        when(credentials.forOrganizer(organizer))
+                .thenReturn(new GatewayCredentialResolver.GatewayMerchantContext("MerNo000001", SECRET));
+        when(merchantApi.paymentMethods(any())).thenReturn(java.util.List.of("CARD", "QR"));
+
+        assertEquals(java.util.Set.of("CARD", "QR"), gateway.supportedPaymentMethods(organizer).orElseThrow());
+        gateway.supportedPaymentMethods(organizer);
+
+        org.mockito.Mockito.verify(merchantApi, org.mockito.Mockito.times(1)).paymentMethods(any());
+        gateway.forgetPaymentMethods(organizer);
+        gateway.supportedPaymentMethods(organizer);
+        org.mockito.Mockito.verify(merchantApi, org.mockito.Mockito.times(2)).paymentMethods(any());
+    }
+
+    @Test
+    void gatewayRefusalMeansNoMethodsButOutageMeansUnknown() {
+        java.util.UUID refused = java.util.UUID.randomUUID();
+        java.util.UUID outage = java.util.UUID.randomUUID();
+        java.util.UUID unprovisioned = java.util.UUID.randomUUID();
+        var ctx = new GatewayCredentialResolver.GatewayMerchantContext("MerNo000001", SECRET);
+        when(credentials.forOrganizer(refused)).thenReturn(ctx);
+        when(credentials.forOrganizer(outage)).thenReturn(ctx);
+        when(credentials.forOrganizer(unprovisioned))
+                .thenThrow(com.example.demo.domain.common.DomainException.conflict("GATEWAY_MERCHANT_NOT_PROVISIONED", "x"));
+        when(merchantApi.paymentMethods(any()))
+                .thenThrow(new com.example.demo.domain.common.DomainException(
+                        org.springframework.http.HttpStatus.CONFLICT, "MERCHANT_INACTIVE", "merchant tắt"))
+                .thenThrow(new com.example.demo.domain.common.DomainException(
+                        org.springframework.http.HttpStatus.BAD_GATEWAY, "GATEWAY_UNREACHABLE", "gateway sập"));
+
+        assertEquals(java.util.Set.of(), gateway.supportedPaymentMethods(refused).orElseThrow());
+        assertTrue(gateway.supportedPaymentMethods(outage).isEmpty());
+        assertTrue(gateway.supportedPaymentMethods(unprovisioned).isEmpty());
     }
 
     private static com.example.demo.domain.payment.CreatePaymentCommand payment(java.util.UUID organizerId, String method) {
@@ -189,9 +224,9 @@ class BankSimPaymentGatewayTest {
         server.start();
         try {
             when(credentials.forRefundReference(any()))
-                    .thenReturn(new GatewayCredentialResolver.GatewayMerchantContext("MerNo000001", "TerNo000001", SECRET));
+                    .thenReturn(new GatewayCredentialResolver.GatewayMerchantContext("MerNo000001", SECRET));
             BankSimPaymentGateway real = new BankSimPaymentGateway(
-                    "http://localhost:" + server.getAddress().getPort(), credentials, new JsonMapper());
+                    "http://localhost:" + server.getAddress().getPort(), credentials, merchantApi, new JsonMapper());
             return assertThrows(GatewayRejectedException.class, () -> real.submitRefund(
                     new RefundCommand("ref-1", 100_000, "Hoan ve 1", "970418", "9998887776")));
         } finally {

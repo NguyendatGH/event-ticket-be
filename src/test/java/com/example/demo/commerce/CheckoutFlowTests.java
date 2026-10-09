@@ -316,6 +316,111 @@ class CheckoutFlowTests {
         assertEquals(1, available(t), "kho KHÔNG được trả lại vì đơn vẫn sống");
     }
 
+    // ---- đổi phương thức = bấm thanh toán lần nữa = đơn mới; đơn chưa trả của chính khách phải bị hủy ----------------
+
+    private String orderIdOf(ResponseEntity<Map> created) {
+        assertTrue(created.getStatusCode().is2xxSuccessful(), String.valueOf(created.getBody()));
+        return (String) created.getBody().get("id");
+    }
+
+    private String providerPaymentIdOf(String orderId) {
+        return jdbc.queryForObject("select provider_payment_id from payments where order_id = ?::uuid", String.class, orderId);
+    }
+
+    @Test
+    void newCheckoutCancelsMyOlderPendingOrderOfTheSameEvent() {
+        Event e = event(EventStatus.PUBLISHED, "Hà Nội");
+        TicketTier t = tier(e, 5, 4);
+        String first = orderIdOf(createOrder(UUID.randomUUID().toString(), e.getId(), t.getId(), 2));
+        assertEquals(3, available(t));
+
+        String second = orderIdOf(createOrder(UUID.randomUUID().toString(), e.getId(), t.getId(), 1));
+
+        assertEquals("CANCELLED", order(first).get("status"), "đơn cũ chưa trả phải bị hủy khi khách tạo đơn mới");
+        assertEquals("PENDING_PAYMENT", order(second).get("status"));
+        assertEquals(4, available(t), "chỉ còn giữ vé của đơn mới (5 - 1), vé của đơn cũ đã được nhả");
+        assertEquals(com.example.demo.domain.payment.PaymentStatusResult.Status.CANCELLED,
+                mockGateway.getPaymentStatus(providerPaymentIdOf(first)).status(), "link thanh toán của đơn cũ cũng bị hủy ở cổng");
+    }
+
+    @Test
+    void keepingChangingThePaymentMethodNeverLeavesMoreThanOnePendingOrder() {
+        Event e = event(EventStatus.PUBLISHED, "Hà Nội");
+        TicketTier t = tier(e, 10, 4);
+        String last = null;
+        for (int i = 0; i < 4; i++) last = orderIdOf(createOrder(UUID.randomUUID().toString(), e.getId(), t.getId(), 2));
+
+        assertEquals(1, jdbc.queryForObject(
+                "select count(*) from orders where event_id = ? and status = 'PENDING_PAYMENT'", Integer.class, e.getId()),
+                "đổi phương thức nhiều lần vẫn chỉ có đúng một đơn đang chờ");
+        assertEquals("PENDING_PAYMENT", order(last).get("status"));
+        assertEquals(8, available(t), "chỉ giữ vé của đơn mới nhất (10 - 2), không khóa vé nhiều lần");
+    }
+
+    @Test
+    void newCheckoutDoesNotTouchMyPendingOrderOfAnotherEvent() {
+        Event a = event(EventStatus.PUBLISHED, "Hà Nội");
+        Event b = event(EventStatus.PUBLISHED, "Đà Nẵng");
+        TicketTier ta = tier(a, 5, 4);
+        TicketTier tb = tier(b, 5, 4);
+        String orderB = orderIdOf(createOrder(UUID.randomUUID().toString(), b.getId(), tb.getId(), 2));
+
+        orderIdOf(createOrder(UUID.randomUUID().toString(), a.getId(), ta.getId(), 1));
+
+        assertEquals("PENDING_PAYMENT", order(orderB).get("status"), "chỉ hủy đơn cùng sự kiện");
+        assertEquals(3, available(tb));
+    }
+
+    @Test
+    void newCheckoutNeverCancelsAnotherBuyersOrder() {
+        Event e = event(EventStatus.PUBLISHED, "Hà Nội");
+        TicketTier t = tier(e, 5, 4);
+        String mine = orderIdOf(createOrder(UUID.randomUUID().toString(), e.getId(), t.getId(), 1));
+
+        RestClient other = RestClient.builder().baseUrl("http://localhost:" + port)
+                .defaultStatusHandler(status -> true, (req, res) -> { })
+                .defaultHeaders(h -> h.setBearerAuth(register())).build();
+        ResponseEntity<Map> theirs = other.post().uri("/api/v1/orders")
+                .headers(h -> h.set("Idempotency-Key", UUID.randomUUID().toString()))
+                .body(Map.of("eventId", e.getId(), "items", List.of(Map.of("tierId", t.getId(), "quantity", 1)),
+                        "customer", Map.of("name", "Tran Thi B", "email", "b@example.com"), "paymentMethod", "PAYOS"))
+                .retrieve().toEntity(Map.class);
+
+        assertTrue(theirs.getStatusCode().is2xxSuccessful(), String.valueOf(theirs.getBody()));
+        assertEquals("PENDING_PAYMENT", order(mine).get("status"), "đơn của người khác không được đụng tới");
+        assertEquals(3, available(t));
+    }
+
+    @Test
+    void newCheckoutKeepsAnOrderThatWasAlreadyPaidAtTheGateway() {
+        Event e = event(EventStatus.PUBLISHED, "Hà Nội");
+        TicketTier t = tier(e, 5, 4);
+        String paid = orderIdOf(createOrder(UUID.randomUUID().toString(), e.getId(), t.getId(), 2));
+        long total = ((Number) order(paid).get("totalAmount")).longValue();
+        mockGateway.markPaid(providerPaymentIdOf(paid), total, "FT-NEW-CHECKOUT-GUARD", Instant.now());
+
+        String next = orderIdOf(createOrder(UUID.randomUUID().toString(), e.getId(), t.getId(), 1));
+
+        assertEquals("PAID", order(paid).get("status"), "khách đã trả (webhook chưa về) thì KHÔNG được hủy, phải chốt PAID");
+        assertEquals(2, ((List<?>) order(paid).get("tickets")).size(), "vé được cấp cho khoản tiền đã nhận");
+        assertEquals("PENDING_PAYMENT", order(next).get("status"));
+        assertEquals(2, available(t), "5 - 2 (đơn đã trả) - 1 (đơn mới)");
+    }
+
+    @Test
+    void retryingTheSameRequestDoesNotCancelTheOrderItJustCreated() {
+        Event e = event(EventStatus.PUBLISHED, "Hà Nội");
+        TicketTier t = tier(e, 5, 4);
+        String key = UUID.randomUUID().toString();
+
+        String first = orderIdOf(createOrder(key, e.getId(), t.getId(), 2));
+        String again = orderIdOf(createOrder(key, e.getId(), t.getId(), 2));
+
+        assertEquals(first, again, "cùng Idempotency-Key trả lại đúng đơn cũ");
+        assertEquals("PENDING_PAYMENT", order(first).get("status"), "gửi lại cùng key không được hủy đơn vừa tạo");
+        assertEquals(3, available(t), "chỉ giữ vé một lần");
+    }
+
     @Test
     void expiryJobExpiresOverdueOrdersAndReleasesInventory() {
         Event e = event(EventStatus.PUBLISHED, "Hà Nội");
