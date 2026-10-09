@@ -22,7 +22,7 @@ class PayOsLiveSmokeTest {
                 System.getenv("PAYOS_CLIENT_ID"), System.getenv("PAYOS_API_KEY"), System.getenv("PAYOS_CHECKSUM_KEY")), "");
         long orderCode = System.currentTimeMillis();
 
-        PaymentLink link = gw.createPaymentLink(new CreatePaymentCommand(orderCode, 2000, "SMOKE " + orderCode,
+        PaymentLink link = gw.createPaymentLink(new CreatePaymentCommand(null, orderCode, 2000, "SMOKE " + orderCode,
                 List.of(new CreatePaymentCommand.Item("Ve test", 1, 2000)),
                 "http://localhost:3000/checkout/return", "http://localhost:3000/checkout/return",
                 Instant.now().plus(Duration.ofMinutes(5))));

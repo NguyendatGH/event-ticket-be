@@ -19,6 +19,10 @@ public final class BankBins {
         return value != null && value.trim().matches("\\d{6}");
     }
 
+    public static boolean exists(String bin) {
+        return bin != null && NAMES.containsKey(bin.trim());
+    }
+
     public static String nameOf(String bin) {
         if (bin == null || bin.isBlank()) return null;
         return NAMES.getOrDefault(bin.trim(), bin.trim());

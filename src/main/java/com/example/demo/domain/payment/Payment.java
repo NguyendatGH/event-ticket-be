@@ -33,8 +33,17 @@ public class Payment {
     @Column(name = "payment_link_id", length = 100)
     private String paymentLinkId;
 
+    @Column(name = "gateway_merchant_no", length = 32)
+    private String gatewayMerchantNo;
+
+    @Column(name = "gateway_terminal_id", length = 32)
+    private String gatewayTerminalId;
+
     @Column(name = "checkout_url")
     private String checkoutUrl;
+
+    @Column(name = "qr_code")
+    private String qrCode;
 
     @Column(name = "provider_transaction_ref", length = 100)
     private String providerTransactionRef;
@@ -67,6 +76,11 @@ public class Payment {
     private Instant updatedAt;
 
     public static Payment pending(UUID orderId, PaymentProvider provider, PaymentLink link, long amount) {
+        return pending(orderId, provider, link, amount, null, null);
+    }
+
+    public static Payment pending(UUID orderId, PaymentProvider provider, PaymentLink link, long amount,
+                                  String gatewayMerchantNo, String gatewayTerminalId) {
         Payment p = new Payment();
         p.id = UUID.randomUUID();
         p.orderId = orderId;
@@ -74,15 +88,37 @@ public class Payment {
         p.providerPaymentId = link.providerPaymentId();
         p.paymentLinkId = link.providerPaymentId();
         p.checkoutUrl = link.checkoutUrl();
+        p.qrCode = link.qrCode();
         p.amount = amount;
+        p.gatewayMerchantNo = gatewayMerchantNo;
+        p.gatewayTerminalId = gatewayTerminalId;
         p.status = PaymentStatus.PENDING;
         p.createdAt = Instant.now();
         return p;
     }
 
+    public static Payment walletPaid(UUID orderId, long amount) {
+        Payment p = new Payment();
+        p.id = UUID.randomUUID();
+        p.orderId = orderId;
+        p.provider = PaymentProvider.WALLET;
+        p.providerPaymentId = "wallet-" + orderId;
+        p.paymentLinkId = p.providerPaymentId;
+        p.amount = amount;
+        p.status = PaymentStatus.PAID;
+        p.providerTransactionRef = p.providerPaymentId;
+        p.paidAt = Instant.now();
+        p.createdAt = Instant.now();
+        return p;
+    }
+
+    public boolean isWallet() { return provider == PaymentProvider.WALLET; }
+
     public void confirmPaid(PaymentEvent e) { apply(e, PaymentStatus.PAID); }
 
     public void markUnderpaid(PaymentEvent e) { apply(e, PaymentStatus.UNDERPAID); }
+
+    public void markOverpaid(PaymentEvent e) { apply(e, PaymentStatus.OVERPAID); }
 
     public void markLate(PaymentEvent e) { apply(e, PaymentStatus.PAID_LATE); }
 

@@ -23,5 +23,16 @@ public interface PaymentGatewayPort {
 
     long getPayoutBalance();
 
+    default java.util.Optional<java.util.Set<String>> payoutableBankBins() {
+        return java.util.Optional.empty();
+    }
+
+    default java.util.Optional<java.util.Set<String>> supportedPaymentMethods(java.util.UUID organizerId) {
+        return java.util.Optional.empty();
+    }
+
+    default void forgetPaymentMethods(java.util.UUID organizerId) {
+    }
+
     RefundEvent verifyAndParseRefund(String rawBody, Map<String, String> headers);
 }

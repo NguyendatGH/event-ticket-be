@@ -191,6 +191,17 @@ public class MockPaymentGateway implements PaymentGatewayPort {
         return payoutBalance.get();
     }
 
+    private final Map<java.util.UUID, java.util.Set<String>> terminalMethods = new ConcurrentHashMap<>();
+
+    public void setTerminalMethods(java.util.UUID organizerId, java.util.Set<String> methods) {
+        terminalMethods.put(organizerId, methods);
+    }
+
+    @Override
+    public Optional<java.util.Set<String>> supportedPaymentMethods(java.util.UUID organizerId) {
+        return Optional.ofNullable(terminalMethods.get(organizerId));
+    }
+
     @Override
     public RefundEvent verifyAndParseRefund(String rawBody, Map<String, String> headers) {
         requireValidSignature(rawBody, headers);

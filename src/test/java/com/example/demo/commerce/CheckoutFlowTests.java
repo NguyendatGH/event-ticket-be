@@ -116,10 +116,15 @@ class CheckoutFlowTests {
 
     @SuppressWarnings("unchecked")
     private ResponseEntity<Map> createOrder(String key, UUID eventId, UUID tierId, int qty) {
+        return createOrder(key, eventId, tierId, qty, "PAYOS");
+    }
+
+    @SuppressWarnings("unchecked")
+    private ResponseEntity<Map> createOrder(String key, UUID eventId, UUID tierId, int qty, String paymentMethod) {
         Map<String, Object> body = Map.of("eventId", eventId,
                 "items", List.of(Map.of("tierId", tierId, "quantity", qty)),
                 "customer", Map.of("name", "Nguyen Van A", "email", "a@example.com"),
-                "paymentMethod", "PAYOS");
+                "paymentMethod", paymentMethod);
         return http().post().uri("/api/v1/orders")
                 .headers(h -> { if (key != null) h.set("Idempotency-Key", key); })
                 .body(body).retrieve().toEntity(Map.class);
@@ -172,6 +177,28 @@ class CheckoutFlowTests {
         assertEquals("PENDING_PAYMENT", order(orderId).get("status"), "đơn của chủ thật không bị ai hủy");
     }
 
+
+    @Test
+    void walletPaymentResponseIncludesTicketsIssuedBeforeReturning() {
+        Event e = event(EventStatus.PUBLISHED, "Hà Nội");
+        TicketTier t = tier(e, 2, 2, 500_000);
+
+        ResponseEntity<Map> topUp = http().post().uri("/api/v1/me/wallet/top-ups")
+                .headers(h -> h.set("Idempotency-Key", UUID.randomUUID().toString()))
+                .body(Map.of("amount", 500_000, "note", "checkout regression"))
+                .retrieve().toEntity(Map.class);
+        assertEquals(200, topUp.getStatusCode().value(), String.valueOf(topUp.getBody()));
+
+        ResponseEntity<Map> res = createOrder(UUID.randomUUID().toString(), e.getId(), t.getId(), 1, "WALLET");
+
+        assertEquals(201, res.getStatusCode().value(), String.valueOf(res.getBody()));
+        assertEquals("PAID", res.getBody().get("status"));
+        assertEquals("PAID", ((Map<?, ?>) res.getBody().get("payment")).get("status"));
+        List<?> tickets = (List<?>) res.getBody().get("tickets");
+        assertEquals(1, tickets.size(), String.valueOf(res.getBody()));
+        assertEquals("ACTIVE", ((Map<?, ?>) tickets.getFirst()).get("status"));
+        assertEquals(1, available(t));
+    }
 
     @Test
     void checkoutReservesInventoryAndReturnsContractShape() {

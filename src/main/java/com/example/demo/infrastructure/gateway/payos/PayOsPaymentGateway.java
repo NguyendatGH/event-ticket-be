@@ -56,9 +56,9 @@ public class PayOsPaymentGateway implements PaymentGatewayPort {
     private final PayOsPayoutClient payout;
 
     @Autowired
-    public PayOsPaymentGateway(@Value("${app.payos.client-id}") String clientId,
-                               @Value("${app.payos.api-key}") String apiKey,
-                               @Value("${app.payos.checksum-key}") String checksumKey,
+    public PayOsPaymentGateway(@Value("${app.payos.client-id:}") String clientId,
+                               @Value("${app.payos.api-key:}") String apiKey,
+                               @Value("${app.payos.checksum-key:}") String checksumKey,
                                @Value("${app.payos.webhook-url:}") String webhookUrl,
                                PayOsPayoutClient payout) {
         this(new PayOS(clientId, apiKey, checksumKey), webhookUrl, payout);
@@ -81,7 +81,7 @@ public class PayOsPaymentGateway implements PaymentGatewayPort {
 
     @EventListener(ApplicationReadyEvent.class)
     public void confirmWebhook() {
-        if (webhookUrl == null || webhookUrl.isBlank()) return;
+        if (webhookUrl == null || webhookUrl.isBlank() || client == null) return;
         try {
             var res = client.webhooks().confirm(webhookUrl);
             log.info("PayOS confirm-webhook OK: url={} merchant={}", res.getWebhookUrl(), res.getName());
@@ -206,7 +206,8 @@ public class PayOsPaymentGateway implements PaymentGatewayPort {
             case PAID -> PaymentStatusResult.Status.PAID;
             case CANCELLED, FAILED -> PaymentStatusResult.Status.CANCELLED;
             case EXPIRED -> PaymentStatusResult.Status.EXPIRED;
-            case PENDING, UNDERPAID, PROCESSING -> PaymentStatusResult.Status.PENDING;
+            case UNDERPAID -> PaymentStatusResult.Status.UNDERPAID;
+            case PENDING, PROCESSING -> PaymentStatusResult.Status.PENDING;
         };
     }
 

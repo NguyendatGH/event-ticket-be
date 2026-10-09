@@ -19,7 +19,7 @@ public record PaymentInfo(PaymentProvider provider, PaymentStatus status, String
 
     static PaymentInfo from(Payment p) {
         return p == null ? null : new PaymentInfo(p.getProvider(), p.getStatus(), p.getCheckoutUrl(),
-                p.getPaymentLinkId(), null, p.getProviderTransactionRef(), p.getPaidAt(),
+                p.getPaymentLinkId(), p.getQrCode(), p.getProviderTransactionRef(), p.getPaidAt(),
                 p.getPayerAccountNumber(), p.getPayerBankBin(), BankBins.nameOf(p.getPayerBankBin()));
     }
 }
