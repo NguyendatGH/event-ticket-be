@@ -23,6 +23,7 @@ import com.example.demo.domain.payment.RefundStatusResult;
 import com.example.demo.domain.payment.RefundSubmitResult;
 import com.example.demo.domain.payment.WebhookEvent;
 import com.example.demo.domain.payment.WebhookProcessingResult;
+import com.example.demo.application.PaymentGatewayRegistry;
 import com.example.demo.domain.refund.Refund;
 import com.example.demo.domain.refund.RefundInitiator;
 import com.example.demo.domain.refund.RefundItem;
@@ -67,7 +68,7 @@ public class RefundService {
     private final RefundRepository refunds;
     private final WebhookEventRepository webhookEvents;
     private final IdempotencyService idempotency;
-    private final PaymentGatewayPort gateway;
+    private final PaymentGatewayRegistry gateways;
     private final GatewayAudit audit;
     private final RefundResultHandler results;
     private final WalletService wallet;
@@ -83,7 +84,7 @@ public class RefundService {
 
     public RefundService(OrderRepository orders, TicketRepository tickets, PaymentRepository payments,
                          EventRepository events, RefundRepository refunds, WebhookEventRepository webhookEvents,
-                         IdempotencyService idempotency, PaymentGatewayPort gateway, GatewayAudit audit,
+                         IdempotencyService idempotency, PaymentGatewayRegistry gateways, GatewayAudit audit,
                          RefundResultHandler results, WalletService wallet, OrganizerAccess access,
                          RefundNotifier notifier, TransactionTemplate tx,
                          @Value("${app.refund.fee-percent:0}") int feePercent,
@@ -99,7 +100,7 @@ public class RefundService {
         this.refunds = refunds;
         this.webhookEvents = webhookEvents;
         this.idempotency = idempotency;
-        this.gateway = gateway;
+        this.gateways = gateways;
         this.audit = audit;
         this.results = results;
         this.wallet = wallet;
@@ -118,15 +119,24 @@ public class RefundService {
                                  RefundInitiator initiator) {
         return idempotency.execute(IdempotencyScope.REFUND, idempotencyKey,
                 Map.of("orderId", orderId, "actorId", actorId, "body", req), RefundResponse.class, () -> {
-                    try (LogContext.Scope ignored = LogContext.of(gateway.provider().name())) {
+                    try (LogContext.Scope ignored = LogContext.of("refund")) {
                         UUID refundId = tx.execute(s -> open(actorId, orderId, req, initiator));
-                        LogContext.refundId(refundId);
-                        submit(refundId);
-                        return get(refundId);
+                        try (LogContext.Scope refundLog = logScope(refunds.findById(refundId).orElseThrow())) {
+                            submit(refundId);
+                            mailIfWaitingForDestinationReview(refundId);
+                            return get(refundId);
+                        }
                     }
                 });
     }
 
+
+    private void mailIfWaitingForDestinationReview(UUID refundId) {
+        boolean waiting = refunds.findById(refundId)
+                .map(x -> x.getStatus() == RefundStatus.MANUAL_REVIEW && "DESTINATION_REVIEW".equals(x.getFailureCode()))
+                .orElse(false);
+        if (waiting) sendMailQuietly("NEEDS_REVIEW", refundId, () -> notifier.needsReview(refundId));
+    }
 
     private UUID open(UUID actorId, UUID orderId, CreateRefundRequest req, RefundInitiator initiator) {
         Order order = orders.findWithLockById(orderId)
@@ -137,6 +147,7 @@ public class RefundService {
                 .orElseThrow(() -> DomainException.notFound("EVENT_NOT_FOUND", "Không tìm thấy sự kiện của đơn"));
         Payment payment = payments.findFirstByOrderIdOrderByCreatedAtDesc(orderId).filter(Payment::isPaid)
                 .orElseThrow(() -> DomainException.conflict("PAYMENT_NOT_FOUND", "Đơn chưa có giao dịch thanh toán thành công"));
+        LogContext.trade(payment.getGatewayMerchantNo(), payment.getGatewayTerminalId(), null);
 
         List<UUID> ids = req.ticketIds().stream().distinct().toList();
         List<Ticket> selected = tickets.findAllByOrderIdAndIdIn(orderId, ids);
@@ -150,11 +161,15 @@ public class RefundService {
 
         boolean toPayer = account != null && !account.isBlank() && account.equals(payment.getPayerAccountNumber());
 
-        if (req.destination() == null && !BankBins.isBin(bin)) {
+        if (payment.isWallet()) {
+            bin = null;
+            account = null;
+            toPayer = true;
+        } else if (req.destination() == null && !BankBins.isBin(bin)) {
             throw DomainException.conflict("PAYER_ACCOUNT_UNKNOWN",
                     "Chưa xác định được ngân hàng của tài khoản đã thanh toán; chọn ngân hàng rồi gửi kèm destination (bin + accountNumber)");
         }
-        if (req.destination() != null && !BankBins.isBin(bin)) {
+        if (!payment.isWallet() && req.destination() != null && !BankBins.isBin(bin)) {
             throw DomainException.badRequest("INVALID_BANK_BIN",
                     "bin phải là mã BIN Napas 6 số; lấy danh sách ở GET /api/v1/config");
         }
@@ -175,6 +190,18 @@ public class RefundService {
         return id;
     }
 
+    private LogContext.Scope logScope(Refund r) {
+        LogContext.Scope scope = LogContext.refund(r.getProvider().name(), r.getId(), r.getProviderRefundId());
+        tagLog(r);
+        return scope;
+    }
+
+    private void tagLog(Refund r) {
+        payments.findById(r.getPaymentId())
+                .ifPresent(p -> LogContext.trade(p.getGatewayMerchantNo(), p.getGatewayTerminalId(), null));
+        orders.findById(r.getOrderId()).ifPresent(o -> LogContext.orderCode(o.getOrderCode()));
+    }
+
     private boolean isMerchantAccount(String bin, String account) {
         if (merchantBin == null || merchantBin.isBlank() || merchantAccount == null || merchantAccount.isBlank()) return false;
         return merchantBin.trim().equals(bin) && merchantAccount.trim().equals(account);
@@ -183,6 +210,12 @@ public class RefundService {
     public void submit(UUID refundId) {
         Refund r = refunds.findById(refundId).orElseThrow();
         if (r.getStatus() != RefundStatus.REQUESTED && r.getStatus() != RefundStatus.AWAITING_FUNDS) return;
+        if (r.getProvider() == PaymentProvider.WALLET) {
+            results.apply(refundId, new RefundStatusResult(RefundStatusResult.Status.SUCCEEDED,
+                    "wallet-refund-" + refundId, null, null, Instant.now()), false);
+            return;
+        }
+        PaymentGatewayPort gateway = gateways.forProvider(r.getProvider());
         if (!payoutEnabled) {
             toManualTransfer(refundId, "PAYOUT_DISABLED", "app.refund.payout-enabled=false, chuyển tay");
             return;
@@ -190,7 +223,7 @@ public class RefundService {
 
         long available;
         try {
-            available = wallet.available();
+            available = wallet.availableFor(r);
         } catch (RuntimeException ex) {
             toManualTransfer(refundId, "PAYOUT_UNAVAILABLE", ex.toString());
             return;
@@ -237,6 +270,7 @@ public class RefundService {
             return;
         }
         audit.record(r.getOrderId(), "OUTBOUND", "submitRefund", cmd.masked(), res, 200, System.currentTimeMillis() - t0);
+        LogContext.trade(null, null, res.providerRefundId());
 
         tx.executeWithoutResult(s -> refunds.findWithLockById(refundId)
                 .filter(x -> x.getStatus() == RefundStatus.REQUESTED)
@@ -311,6 +345,8 @@ public class RefundService {
     }
 
     private boolean adoptByReference(UUID refundId, String key) {
+        Refund refund = refunds.findById(refundId).orElseThrow();
+        PaymentGatewayPort gateway = gateways.forProvider(refund.getProvider());
         Optional<RefundStatusResult> found;
         try {
             found = gateway.findRefundByReference(key);
@@ -342,8 +378,16 @@ public class RefundService {
             }
             case "INVALID_DESTINATION" -> results.apply(refundId,
                     new RefundStatusResult(RefundStatusResult.Status.FAILED, null, ex.getCode(), ex.getMessage(), Instant.now()), false);
-            default -> tx.executeWithoutResult(
-                    s -> refunds.findWithLockById(refundId).ifPresent(x -> x.manualReview(ex.getCode(), ex.getMessage())));
+            default -> {
+                boolean movedToReview = Boolean.TRUE.equals(tx.execute(s -> refunds.findWithLockById(refundId)
+                        .map(x -> {
+                            boolean was = x.getStatus() == RefundStatus.MANUAL_REVIEW;
+                            x.manualReview(ex.getCode(), ex.getMessage());
+                            return !was;
+                        })
+                        .orElse(false)));
+                if (movedToReview) sendMailQuietly("NEEDS_REVIEW", refundId, () -> notifier.needsReview(refundId));
+            }
         }
     }
 
@@ -381,15 +425,14 @@ public class RefundService {
     }
 
     public WebhookProcessingResult handleRefundWebhook(PaymentProvider provider, String rawBody, Map<String, String> headers) {
-        if (gateway.provider() != provider) {
-            throw DomainException.notFound("PROVIDER_INACTIVE", "Provider " + provider + " không hoạt động ở profile này");
-        }
+        PaymentGatewayPort gateway = gateways.forProvider(provider);
         try (LogContext.Scope ignored = LogContext.of(provider.name())) {
             return applyRefundWebhook(provider, rawBody, headers);
         }
     }
 
     private WebhookProcessingResult applyRefundWebhook(PaymentProvider provider, String rawBody, Map<String, String> headers) {
+        PaymentGatewayPort gateway = gateways.forProvider(provider);
         RefundEvent e;
         try {
             e = gateway.verifyAndParseRefund(rawBody, headers);
@@ -402,8 +445,11 @@ public class RefundService {
             saved = tx.execute(s -> webhookEvents.saveAndFlush(
                     WebhookEvent.received(provider, e.eventId(), "refund", e.rawPayload())));
         } catch (DataIntegrityViolationException duplicate) {
-            log.info("Webhook refund trùng {} {}: bỏ qua", provider, e.eventId());
-            return DUPLICATE;
+            if (webhookEvents.findByProviderAndEventId(provider, e.eventId()).isPresent()) {
+                log.info("Webhook refund trùng {} {}: bỏ qua", provider, e.eventId());
+                return DUPLICATE;
+            }
+            throw duplicate;
         }
         Refund refund = refunds.findByProviderAndProviderRefundId(provider, e.providerRefundId())
                 .or(() -> refunds.findByIdempotencyKey(e.referenceId())).orElse(null);
@@ -413,6 +459,7 @@ public class RefundService {
             result = IGNORED;
         } else {
             LogContext.refundId(refund.getId());
+            tagLog(refund);
             result = results.apply(refund.getId(),
                     new RefundStatusResult(e.status(), e.providerRefundId(), e.failureCode(), e.failureReason(), Instant.now()), false);
             audit.record(refund.getOrderId(), "INBOUND", "webhook:refund", null, e.rawPayload(), 200, 0);
@@ -425,14 +472,15 @@ public class RefundService {
 
     public void pollProcessing() {
         for (Refund r : refunds.findAllByStatusOrderByCreatedAt(RefundStatus.PROCESSING)) {
-            if (r.getProvider() != gateway.provider() || r.getProviderRefundId() == null) continue;
-            try (LogContext.Scope ignored = LogContext.refund(r.getProvider().name(), r.getId())) {
+            if (r.getProviderRefundId() == null) continue;
+            try (LogContext.Scope ignored = logScope(r)) {
                 poll(r);
             }
         }
     }
 
     private void poll(Refund r) {
+        PaymentGatewayPort gateway = gateways.forProvider(r.getProvider());
         long t0 = System.currentTimeMillis();
         RefundStatusResult status;
         try {
@@ -447,13 +495,16 @@ public class RefundService {
                 status, 200, System.currentTimeMillis() - t0);
         if (status.inFlight()) {
             boolean tooLong = r.getSubmittedAt() != null && r.getSubmittedAt().plus(processingTimeout).isBefore(Instant.now());
-            tx.executeWithoutResult(s -> refunds.findWithLockById(r.getId()).ifPresent(x -> {
+            boolean timedOut = Boolean.TRUE.equals(tx.execute(s -> refunds.findWithLockById(r.getId()).map(x -> {
                 x.polled();
                 if (tooLong && x.getStatus() == RefundStatus.PROCESSING) {
                     x.manualReview("PROCESSING_TIMEOUT", "Provider chưa chốt sau " + processingTimeout
                             + "; lệnh có thể vẫn đang bay, KHÔNG gửi lại, tra dashboard trước");
+                    return true;
                 }
-            }));
+                return false;
+            }).orElse(false)));
+            if (timedOut) sendMailQuietly("NEEDS_REVIEW", r.getId(), () -> notifier.needsReview(r.getId()));
             return;
         }
         results.apply(r.getId(), status, false);
@@ -462,8 +513,8 @@ public class RefundService {
     public void drainQueue() {
         List<Refund> queue = refunds.findAllByStatusOrderByQueuedSince(RefundStatus.AWAITING_FUNDS);
         if (queue.isEmpty()) return;
-        long available = wallet.available();
         for (Refund r : queue) {
+            long available = wallet.available(r.getProvider());
             if (r.getQueuedSince() != null && r.getQueuedSince().plus(awaitingFundsTimeout).isBefore(Instant.now())) {
                 boolean movedToReview = Boolean.TRUE.equals(tx.execute(s -> refunds.findWithLockById(r.getId())
                         .map(x -> {
@@ -476,7 +527,7 @@ public class RefundService {
                 continue;
             }
             if (r.getAmount() > available) break;
-            try (LogContext.Scope ignored = LogContext.refund(r.getProvider().name(), r.getId())) {
+            try (LogContext.Scope ignored = logScope(r)) {
                 submit(r.getId());
             }
             available -= r.getAmount();
@@ -486,8 +537,8 @@ public class RefundService {
     public void recoverStuck() {
         Instant cutoff = Instant.now().minus(STUCK_AFTER);
         for (Refund r : refunds.findAllByStatusAndSubmittedAtBefore(RefundStatus.REQUESTED, cutoff)) {
-            if (r.getProvider() != gateway.provider() || r.getIdempotencyKey() == null) continue;
-            try (LogContext.Scope ignored = LogContext.refund(r.getProvider().name(), r.getId())) {
+            if (r.getIdempotencyKey() == null) continue;
+            try (LogContext.Scope ignored = logScope(r)) {
                 if (!adoptByReference(r.getId(), r.getIdempotencyKey())) {
                     log.info("Refund {} không có ở provider, gửi lại cùng key {}", r.getId(), r.getIdempotencyKey());
                     submit(r.getId());
@@ -496,7 +547,7 @@ public class RefundService {
         }
         refunds.findAllByStatusAndSubmittedAtIsNullAndCreatedAtBefore(RefundStatus.REQUESTED, cutoff)
                 .forEach(r -> {
-                    try (LogContext.Scope ignored = LogContext.refund(r.getProvider().name(), r.getId())) {
+                    try (LogContext.Scope ignored = logScope(r)) {
                         submit(r.getId());
                     }
                 });
@@ -511,7 +562,7 @@ public class RefundService {
             throw DomainException.conflict("REFUND_NOT_IN_REVIEW",
                     "Chỉ chốt được refund đang MANUAL_REVIEW (hiện tại: " + r.getStatus() + ")");
         }
-        try (LogContext.Scope ignored = LogContext.refund(r.getProvider().name(), refundId)) {
+        try (LogContext.Scope ignored = logScope(r)) {
             log.info("Admin resolve refund {}: {} ({})", refundId, req.outcome(), req.note());
             return applyResolve(r, refundId, req);
         }

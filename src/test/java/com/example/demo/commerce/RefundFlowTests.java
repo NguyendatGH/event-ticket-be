@@ -10,6 +10,7 @@ import com.example.demo.domain.event.EventStatus;
 import com.example.demo.domain.event.TicketTier;
 import com.example.demo.domain.event.Venue;
 import com.example.demo.domain.inventory.Inventory;
+import com.example.demo.domain.payment.PaymentProvider;
 import com.example.demo.domain.refund.RefundStatus;
 import com.example.demo.infrastructure.mail.CustomerRefundMailInfo;
 import com.example.demo.infrastructure.mail.Mailer;
@@ -39,6 +40,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -571,6 +573,141 @@ class RefundFlowTests {
         assertEquals(10, available(t));
     }
 
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void walletJustEnoughForThisRefundPaysOutWithoutQueueing() {
+        String email = "btc-" + UUID.randomUUID() + "@example.com";
+        String organizer = registerOrganizer(email);
+        Event e = event(Instant.now().plusSeconds(10 * 86_400), organizerId(email));
+        TicketTier t = tier(e, 10, 200_000);
+        long original = ((Number) get("/mock-gateway/balance").getBody().get("balance")).longValue();
+
+        Map<?, ?> order = paidOrder(e, t, 1);
+        leaveInWallet(300_000);
+        Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(), null).getBody();
+        assertEquals("PROCESSING", r.get("status"), String.valueOf(r));
+        post("/mock-gateway/refunds/" + r.get("id") + "/succeed");
+
+        Map<?, ?> other = paidOrder(e, t, 1);
+        Map<?, ?> r2 = requestRefund(other.get("id"), ticketIds(other), UUID.randomUUID().toString(),
+                Map.of("bin", "970422", "accountNumber", "1234567891")).getBody();
+        assertEquals("MANUAL_REVIEW", r2.get("status"), String.valueOf(r2));
+        leaveInWallet(300_000);
+        assertEquals(200, resolveAsOrganizer(organizer, UUID.fromString((String) r2.get("id")), "RETRY").getStatusCode().value());
+        assertEquals("PROCESSING", refund(r2.get("id")).get("status"));
+        post("/mock-gateway/refunds/" + r2.get("id") + "/succeed");
+
+        verify(mailer, never()).sendRefundAwaitingFunds(any(), any());
+        assertEquals(10, available(t));
+        post("/mock-gateway/balance?amount=" + original);
+    }
+
+    private void leaveInWallet(long free) {
+        Map<?, ?> mock = get("/mock-gateway/balance").getBody();
+        long balance = ((Number) mock.get("balance")).longValue();
+        long heldByEncore = balance - wallet.available(PaymentProvider.MOCK);
+        long heldByMock = ((Number) mock.get("reserved")).longValue();
+        post("/mock-gateway/balance?amount=" + (Math.max(heldByEncore, heldByMock) + free));
+    }
+
+    @Test
+    void destinationReviewMailsOrganizerOnce() {
+        String email = "btc-" + UUID.randomUUID() + "@example.com";
+        registerOrganizer(email);
+        Event e = event(Instant.now().plusSeconds(10 * 86_400), organizerId(email));
+        TicketTier t = tier(e, 10, 200_000);
+        Map<?, ?> order = paidOrder(e, t, 1);
+        String key = UUID.randomUUID().toString();
+        Map<String, String> other = Map.of("bin", "970422", "accountNumber", "1234567891");
+
+        Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), key, other).getBody();
+        assertEquals("MANUAL_REVIEW", r.get("status"), String.valueOf(r));
+        ArgumentCaptor<RefundMailInfo> sent = ArgumentCaptor.forClass(RefundMailInfo.class);
+        verify(mailer).sendRefundNeedsReview(eq(email), sent.capture());
+        assertEquals("DESTINATION_REVIEW", sent.getValue().reasonCode());
+
+        requestRefund(order.get("id"), ticketIds(order), key, other);
+        verify(mailer, times(1)).sendRefundNeedsReview(eq(email), any());
+    }
+
+    @Test
+    void processingTimeoutMailsOrganizerOnce() {
+        String email = "btc-" + UUID.randomUUID() + "@example.com";
+        registerOrganizer(email);
+        Event e = event(Instant.now().plusSeconds(10 * 86_400), organizerId(email));
+        TicketTier t = tier(e, 10, 200_000);
+        Map<?, ?> order = paidOrder(e, t, 1);
+        Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(), null).getBody();
+        assertEquals("PROCESSING", r.get("status"), String.valueOf(r));
+        jdbc.update("update refunds set submitted_at = now() - interval '2 hours' where id = ?::uuid", r.get("id"));
+
+        refundService.pollProcessing();
+        assertEquals("MANUAL_REVIEW", refund(r.get("id")).get("status"));
+        ArgumentCaptor<RefundMailInfo> sent = ArgumentCaptor.forClass(RefundMailInfo.class);
+        verify(mailer).sendRefundNeedsReview(eq(email), sent.capture());
+        assertEquals("PROCESSING_TIMEOUT", sent.getValue().reasonCode());
+
+        refundService.pollProcessing();
+        verify(mailer, times(1)).sendRefundNeedsReview(eq(email), any());
+    }
+
+    @Test
+    void providerHoldMailsOrganizer() {
+        String email = "btc-" + UUID.randomUUID() + "@example.com";
+        registerOrganizer(email);
+        Event e = event(Instant.now().plusSeconds(10 * 86_400), organizerId(email));
+        TicketTier t = tier(e, 10, 200_000);
+        Map<?, ?> order = paidOrder(e, t, 1);
+        Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(), null).getBody();
+
+        post("/mock-gateway/refunds/" + r.get("id") + "/hold");
+        assertEquals("MANUAL_REVIEW", refund(r.get("id")).get("status"));
+        ArgumentCaptor<RefundMailInfo> sent = ArgumentCaptor.forClass(RefundMailInfo.class);
+        verify(mailer).sendRefundNeedsReview(eq(email), sent.capture());
+        assertEquals("ON_HOLD", sent.getValue().reasonCode());
+    }
+
+    @Test
+    void customerIsMailedWhenRefundSucceedsOrFails() {
+        Event e = event();
+        TicketTier t = tier(e, 10, 200_000);
+
+        Map<?, ?> order = paidOrder(e, t, 1);
+        Map<?, ?> ok = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(), null).getBody();
+        verify(mailer, never()).sendRefundSucceededToCustomer(any(), any(), any());
+        post("/mock-gateway/refunds/" + ok.get("id") + "/succeed");
+        ArgumentCaptor<CustomerRefundMailInfo> info = ArgumentCaptor.forClass(CustomerRefundMailInfo.class);
+        ArgumentCaptor<String> destination = ArgumentCaptor.forClass(String.class);
+        verify(mailer).sendRefundSucceededToCustomer(eq(CONTACT_EMAIL), info.capture(), destination.capture());
+        assertEquals(200_000, info.getValue().amount());
+        String account = jdbc.queryForObject("select destination_account from refunds where id = ?::uuid", String.class, ok.get("id"));
+        assertTrue(destination.getValue().endsWith("••••" + account.substring(account.length() - 4)), destination.getValue());
+        assertFalse(destination.getValue().contains(account), "không được lộ số tài khoản đầy đủ trong mail");
+
+        Map<?, ?> other = paidOrder(e, t, 1);
+        Map<?, ?> bad = requestRefund(other.get("id"), ticketIds(other), UUID.randomUUID().toString(),
+                Map.of("bin", "970422", "accountNumber", "1234567000")).getBody();
+        refundService.resolve(UUID.fromString((String) bad.get("id")),
+                new ResolveRefundRequest(ResolveRefundRequest.Outcome.RETRY, "BTC duyệt", null));
+        assertEquals("FAILED", refund(bad.get("id")).get("status"));
+        verify(mailer).sendRefundFailedToCustomer(eq(CONTACT_EMAIL), any(), eq("INVALID_DESTINATION"));
+        verify(mailer, times(1)).sendRefundSucceededToCustomer(any(), any(), any());
+    }
+
+    @Test
+    void organizerCancelSendsOnlyTheCancelMail() {
+        Event e = event();
+        TicketTier t = tier(e, 10, 200_000);
+        Map<?, ?> order = paidOrder(e, t, 1);
+        Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(),
+                Map.of("bin", "970422", "accountNumber", "1234567891")).getBody();
+
+        refundService.resolve(UUID.fromString((String) r.get("id")), cancel("khách đồng ý giữ vé"));
+
+        verify(mailer, times(1)).sendRefundCancelledToCustomer(eq(CONTACT_EMAIL), any());
+        verify(mailer, never()).sendRefundFailedToCustomer(any(), any(), any());
+    }
 
     @Test
     @SuppressWarnings("unchecked")

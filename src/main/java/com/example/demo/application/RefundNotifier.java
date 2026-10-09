@@ -3,6 +3,8 @@ package com.example.demo.application;
 import com.example.demo.domain.event.Event;
 import com.example.demo.domain.order.Order;
 import com.example.demo.domain.organizer.Organizer;
+import com.example.demo.domain.payment.BankBins;
+import com.example.demo.domain.payment.PaymentProvider;
 import com.example.demo.domain.refund.Refund;
 import com.example.demo.domain.user.User;
 import com.example.demo.infrastructure.mail.CustomerRefundMailInfo;
@@ -57,32 +59,59 @@ public class RefundNotifier {
     }
 
     public void cancelledByOrganizer(UUID refundId) {
+        sendToCustomer(refundId, "CANCELLED_TO_CUSTOMER", (to, refund, info) -> mailer.sendRefundCancelledToCustomer(to, info));
+    }
+
+    public void succeededToCustomer(UUID refundId) {
+        sendToCustomer(refundId, "SUCCEEDED_TO_CUSTOMER",
+                (to, refund, info) -> mailer.sendRefundSucceededToCustomer(to, info, destinationOf(refund)));
+    }
+
+    public void failedToCustomer(UUID refundId) {
+        sendToCustomer(refundId, "FAILED_TO_CUSTOMER",
+                (to, refund, info) -> mailer.sendRefundFailedToCustomer(to, info, refund.getFailureCode()));
+    }
+
+    private void sendToCustomer(UUID refundId, String kind, CustomerMailSender sender) {
         try {
             Refund refund = refunds.findById(refundId).orElse(null);
             if (refund == null) {
-                log.warn("Không gửi được mail hủy hoàn vé cho refund {}: không còn tìm thấy refund", refundId);
+                log.warn("Không gửi được mail {} cho refund {}: không còn tìm thấy refund", kind, refundId);
                 return;
             }
             String to = refund.getContactEmail();
             if (to == null || to.isBlank()) {
-                log.warn("Refund {} bị BTC hủy nhưng không có contact_email (refund tạo trước migration V7?), "
-                        + "khách sẽ không được thông báo", refundId);
+                log.warn("Refund {} cần báo khách ({}) nhưng không có contact_email (refund tạo trước migration V7?)",
+                        refundId, kind);
                 return;
             }
             Order order = orders.findById(refund.getOrderId()).orElse(null);
             if (order == null) {
-                log.warn("Không gửi được mail hủy hoàn vé cho refund {}: không tìm thấy đơn {}",
-                        refundId, refund.getOrderId());
+                log.warn("Không gửi được mail {} cho refund {}: không tìm thấy đơn {}", kind, refundId, refund.getOrderId());
                 return;
             }
             CustomerRefundMailInfo info = new CustomerRefundMailInfo(order.getCustomerName(), order.getOrderCode(),
                     refund.getAmount(), refund.getItems().size(), orderUrl(order.getId()));
-            mailer.sendRefundCancelledToCustomer(to, info);
-            log.info("Đã gửi mail hủy hoàn vé cho khách {} về refund {} ({} VND, {} vé)",
-                    to, refundId, refund.getAmount(), refund.getItems().size());
+            sender.send(to, refund, info);
+            log.info("Đã gửi mail {} cho khách {} về refund {} ({} VND, {} vé)",
+                    kind, to, refundId, refund.getAmount(), refund.getItems().size());
         } catch (RuntimeException ex) {
-            log.warn("Gửi mail hủy hoàn vé cho refund {} thất bại: {}", refundId, ex.toString());
+            log.warn("Gửi mail {} cho refund {} thất bại: {}", kind, refundId, ex.toString());
         }
+    }
+
+    private static String destinationOf(Refund refund) {
+        if (refund.getProvider() == PaymentProvider.WALLET) return "Ví Encore của bạn";
+        String account = refund.getDestinationAccount();
+        if (account == null || account.isBlank()) return null;
+        String bank = BankBins.nameOf(refund.getDestinationBin());
+        String last4 = "••••" + account.substring(Math.max(0, account.length() - 4));
+        return bank == null || bank.isBlank() ? last4 : bank + " " + last4;
+    }
+
+    @FunctionalInterface
+    private interface CustomerMailSender {
+        void send(String toEmail, Refund refund, CustomerRefundMailInfo info);
     }
 
     private String orderUrl(UUID orderId) {

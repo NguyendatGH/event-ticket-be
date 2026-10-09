@@ -56,6 +56,10 @@ public interface RefundRepository extends JpaRepository<Refund, UUID> {
     @Query("select coalesce(sum(r.amount), 0) from Refund r where r.status in :statuses")
     long sumAmountByStatusIn(@Param("statuses") Collection<RefundStatus> statuses);
 
+    @Query("select coalesce(sum(r.amount), 0) from Refund r where r.provider = :provider and r.status in :statuses")
+    long sumAmountByProviderAndStatusIn(@Param("provider") PaymentProvider provider,
+                                        @Param("statuses") Collection<RefundStatus> statuses);
+
     @Query("select coalesce(sum(r.amount), 0) from Refund r where r.orderId = :orderId and r.status in :statuses")
     long sumAmountByOrderIdAndStatusIn(@Param("orderId") UUID orderId, @Param("statuses") Collection<RefundStatus> statuses);
 }

@@ -93,6 +93,49 @@ public class Mailer {
         }
     }
 
+    public void sendRefundSucceededToCustomer(String toEmail, CustomerRefundMailInfo info, String destination) {
+        String subject = "[Đơn " + info.orderCode() + "] Đã hoàn tiền vé cho bạn";
+        try {
+            if (skipSending(toEmail, subject)) return;
+            Map<String, String> values = Map.of(
+                    "customerName", nvl(info.customerName(), "bạn"),
+                    "orderCode", String.valueOf(info.orderCode()),
+                    "amount", MailTemplates.formatVnd(info.amount()),
+                    "ticketCount", String.valueOf(info.ticketCount()),
+                    "destination", nvl(destination, "tài khoản bạn đã chọn"),
+                    "orderUrl", nvl(info.orderUrl(), ""));
+            send(toEmail, subject, MailTemplates.render("refund-succeeded", values));
+        } catch (Exception e) {
+            log.warn("Không gửi được mail hoàn tiền thành công cho đơn {}: {}", info.orderCode(), e.toString());
+        }
+    }
+
+    public void sendRefundFailedToCustomer(String toEmail, CustomerRefundMailInfo info, String reasonCode) {
+        String subject = "[Đơn " + info.orderCode() + "] Chưa hoàn được tiền vé — vé của bạn vẫn dùng được";
+        try {
+            if (skipSending(toEmail, subject)) return;
+            Map<String, String> values = Map.of(
+                    "customerName", nvl(info.customerName(), "bạn"),
+                    "orderCode", String.valueOf(info.orderCode()),
+                    "amount", MailTemplates.formatVnd(info.amount()),
+                    "ticketCount", String.valueOf(info.ticketCount()),
+                    "reasonText", customerReasonText(reasonCode),
+                    "orderUrl", nvl(info.orderUrl(), ""));
+            send(toEmail, subject, MailTemplates.render("refund-failed", values));
+        } catch (Exception e) {
+            log.warn("Không gửi được mail hoàn tiền thất bại cho đơn {}: {}", info.orderCode(), e.toString());
+        }
+    }
+
+    private static String customerReasonText(String code) {
+        return switch (code == null ? "" : code) {
+            case "INVALID_DESTINATION" ->
+                    "Không chuyển được tiền tới ngân hàng / số tài khoản bạn đã chọn. Hãy gửi yêu cầu mới với tài khoản khác.";
+            case "ADMIN_REJECTED" -> "Ban tổ chức đã từ chối yêu cầu sau khi kiểm tra.";
+            default -> "Lệnh chuyển tiền hoàn vé không thành công.";
+        };
+    }
+
     private static String reasonText(String code) {
         return switch (code == null ? "" : code) {
             case "INSUFFICIENT_PAYOUT_BALANCE" ->
@@ -111,6 +154,14 @@ public class Mailer {
                     "Vượt hạn mức chi của cổng thanh toán (hạn mức mỗi lần hoặc mỗi ngày). Chờ qua hạn mức hoặc chuyển khoản tay.";
             case "INVALID_DESTINATION" ->
                     "Số tài khoản / ngân hàng nhận tiền không hợp lệ. Cần liên hệ khách để lấy lại thông tin rồi tạo yêu cầu mới.";
+            case "DESTINATION_REVIEW" ->
+                    "Khách xin hoàn về một tài khoản KHÁC tài khoản đã thanh toán (luôn xảy ra với đơn thanh toán thẻ). "
+                            + "Hệ thống không tự chi tới tài khoản lạ: xác nhận với khách rồi bấm gửi lệnh chi, "
+                            + "hoặc chuyển khoản tay rồi đánh dấu đã hoàn, hoặc từ chối.";
+            case "ON_HOLD" ->
+                    "Cổng thanh toán đang tạm giữ lệnh chi. Kiểm tra trạng thái lệnh trên dashboard của cổng trước khi chốt.";
+            case "REVERSED" ->
+                    "Cổng thanh toán báo lệnh chi đã bị đảo (tiền có thể đã quay về). Kiểm tra dashboard của cổng trước khi chốt.";
             default ->
                     "Hệ thống không tự xử lý được yêu cầu này nên cần người kiểm tra. Xem chi tiết trong trang quản lý hoàn tiền.";
         };

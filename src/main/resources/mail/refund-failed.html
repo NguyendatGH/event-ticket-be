@@ -1,0 +1,54 @@
+<!-- Mail báo KHÁCH rằng yêu cầu hoàn vé KHÔNG thành công (provider từ chối, BTC từ chối, tài khoản nhận không dùng
+     được). Biến: customerName orderCode amount ticketCount reasonText orderUrl. reasonText là câu viết cho khách, map
+     từ mã lý do trong Mailer.customerReasonText(). BTC tự HỦY yêu cầu thì dùng refund-cancelled.html, không dùng file này. -->
+<div style="margin:0;padding:24px 16px;background:#f4f5f7;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+  <div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:8px;padding:28px 24px;">
+
+    <h1 style="margin:0 0 16px;font-size:20px;line-height:1.4;color:#b91c1c;">
+      Chưa hoàn được tiền vé cho bạn
+    </h1>
+
+    <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">
+      Xin chào {{customerName}}, yêu cầu hoàn vé của bạn cho đơn <strong>{{orderCode}}</strong>
+      <strong>không thành công</strong>. Chưa có khoản tiền nào được chuyển cho yêu cầu này.
+    </p>
+
+    <p style="margin:0 0 6px;font-size:14px;line-height:1.6;color:#6b7280;">Lý do</p>
+    <p style="margin:0 0 20px;font-size:14px;line-height:1.6;background:#fee2e2;border-radius:6px;padding:12px 14px;">
+      {{reasonText}}
+    </p>
+
+    <p style="margin:0 0 20px;font-size:15px;line-height:1.6;background:#dcfce7;border-radius:6px;padding:12px 14px;">
+      <strong>Vé của bạn vẫn còn dùng được.</strong> Nếu vẫn muốn hoàn vé, bạn có thể gửi lại yêu cầu mới trên
+      trang đơn, hoặc liên hệ ban tổ chức sự kiện.
+    </p>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           style="width:100%;font-size:14px;line-height:1.6;background:#f9fafb;border-radius:6px;margin:0 0 20px;">
+      <tr>
+        <td style="padding:12px 14px;color:#6b7280;width:40%;">Mã đơn</td>
+        <td style="padding:12px 14px;font-weight:bold;">{{orderCode}}</td>
+      </tr>
+      <tr>
+        <td style="padding:12px 14px;color:#6b7280;">Số tiền đã yêu cầu hoàn</td>
+        <td style="padding:12px 14px;font-weight:bold;">{{amount}}</td>
+      </tr>
+      <tr>
+        <td style="padding:12px 14px;color:#6b7280;">Số vé trong yêu cầu</td>
+        <td style="padding:12px 14px;">{{ticketCount}}</td>
+      </tr>
+    </table>
+
+    <p style="margin:0 0 20px;">
+      <a href="{{orderUrl}}"
+         style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-size:15px;font-weight:bold;padding:12px 24px;border-radius:6px;">
+        Xem đơn và vé của tôi
+      </a>
+    </p>
+
+    <p style="margin:0;font-size:12px;line-height:1.6;color:#6b7280;word-break:break-all;">
+      Nút không bấm được? Dán link này vào trình duyệt:<br>{{orderUrl}}
+    </p>
+
+  </div>
+</div>
