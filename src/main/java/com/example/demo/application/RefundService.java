@@ -147,7 +147,7 @@ public class RefundService {
                 .orElseThrow(() -> DomainException.notFound("EVENT_NOT_FOUND", "Không tìm thấy sự kiện của đơn"));
         Payment payment = payments.findFirstByOrderIdOrderByCreatedAtDesc(orderId).filter(Payment::isPaid)
                 .orElseThrow(() -> DomainException.conflict("PAYMENT_NOT_FOUND", "Đơn chưa có giao dịch thanh toán thành công"));
-        LogContext.trade(payment.getGatewayMerchantNo(), payment.getGatewayTerminalId(), null);
+        LogContext.trade(payment.getGatewayMerchantNo(), null, null);
 
         List<UUID> ids = req.ticketIds().stream().distinct().toList();
         List<Ticket> selected = tickets.findAllByOrderIdAndIdIn(orderId, ids);
@@ -198,7 +198,7 @@ public class RefundService {
 
     private void tagLog(Refund r) {
         payments.findById(r.getPaymentId())
-                .ifPresent(p -> LogContext.trade(p.getGatewayMerchantNo(), p.getGatewayTerminalId(), null));
+                .ifPresent(p -> LogContext.trade(p.getGatewayMerchantNo(), null, null));
         orders.findById(r.getOrderId()).ifPresent(o -> LogContext.orderCode(o.getOrderCode()));
     }
 

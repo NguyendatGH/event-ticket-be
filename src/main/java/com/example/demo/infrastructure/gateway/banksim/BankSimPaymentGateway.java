@@ -48,12 +48,14 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
     private static final String SIGNATURE_HEADER = "x-mock-signature";
     private final RestClient http;
     private final GatewayCredentialResolver credentials;
+    private final BankSimMerchantClient merchantApi;
     private final ObjectMapper json;
     private volatile SupportedBins supportedBins;
-    private final Map<java.util.UUID, Routing> supportedMethods = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<java.util.UUID, CachedMethods> supportedMethods = new java.util.concurrent.ConcurrentHashMap<>();
 
     public BankSimPaymentGateway(@Value("${app.bank-simulate.base-url}") String baseUrl,
                                  GatewayCredentialResolver credentials,
+                                 BankSimMerchantClient merchantApi,
                                  ObjectMapper json) {
         this.http = RestClient.builder()
                 .baseUrl(baseUrl.replaceAll("/$", ""))
@@ -61,6 +63,7 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
                 .requestInterceptor(BankSimPaymentGateway::logExchange)
                 .build();
         this.credentials = credentials;
+        this.merchantApi = merchantApi;
         log.info("BankSim gateway client: baseUrl={} (credential lấy theo từng organizer)", baseUrl);
         this.json = json;
     }
@@ -74,15 +77,12 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
             for (CreatePaymentCommand.Item item : c.items()) {
                 items.add(new BankItem(item.name(), item.quantity(), item.price()));
             }
-            GatewayCredentialResolver.GatewayMerchantContext binding = credentials.forOrganizer(c.organizerId());
-            GatewayCredentialResolver.GatewayMerchantContext ctx = binding.withTerminal(
-                    terminalFor(c.organizerId(), c.paymentMethod(), binding.terminalId()));
+            GatewayCredentialResolver.GatewayMerchantContext ctx = credentials.forOrganizer(c.organizerId());
             BankPaymentResponse response = post(ctx, "/api/v1/gateway/payments")
                     .body(new BankPaymentRequest(c.orderCode(), c.amount(), c.description(), c.paymentMethod(),
                             null, items, c.returnUrl(), c.cancelUrl(), c.expiresAt()))
                     .retrieve().body(BankPaymentResponse.class);
-            return new PaymentLink(response.providerPaymentId(), response.checkoutUrl(), response.qrCode(),
-                    ctx.merchantNo(), ctx.terminalId());
+            return new PaymentLink(response.providerPaymentId(), response.checkoutUrl(), response.qrCode(), ctx.merchantNo());
         } catch (RestClientResponseException ex) {
             throw new IllegalStateException("BankSim rejected createPaymentLink: " + ex.getStatusCode()
                     + " " + ex.getResponseBodyAsString(), ex);
@@ -214,63 +214,27 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
 
     @Override
     public java.util.Optional<java.util.Set<String>> supportedPaymentMethods(java.util.UUID organizerId) {
-        Routing routing = routing(organizerId);
-        return routing == null ? Optional.empty() : routing.methods();
-    }
-
-    private Routing routing(java.util.UUID organizerId) {
-        if (organizerId == null) return null;
+        if (organizerId == null) return Optional.empty();
+        CachedMethods cached = supportedMethods.get(organizerId);
+        if (cached != null && cached.freshAt().isAfter(Instant.now().minusSeconds(15))) return cached.methods();
         GatewayCredentialResolver.GatewayMerchantContext ctx;
         try {
             ctx = credentials.forOrganizer(organizerId);
         } catch (com.example.demo.domain.common.DomainException ex) {
-            log.info("organizer={} chưa có terminal banksim dùng được ({}), chưa lọc phương thức", organizerId, ex.getCode());
-            return null;
+            log.info("organizer={} chưa có merchant banksim dùng được ({}), chưa lọc phương thức", organizerId, ex.getCode());
+            return Optional.empty();
         }
-        List<String> channelTerminals = credentials.channelTerminals(organizerId);
-        List<String> terminals = channelTerminals.isEmpty() ? List.of(ctx.terminalId()) : channelTerminals;
-        Routing cached = supportedMethods.get(organizerId);
-        if (cached != null && cached.terminals().equals(terminals)
-                && cached.freshAt().isAfter(Instant.now().minusSeconds(15))) return cached;
-
-        java.util.Set<String> union = new java.util.LinkedHashSet<>();
-        Map<String, String> terminalByMethod = new java.util.HashMap<>();
-        boolean anyAnswered = false;
-        for (String terminalId : terminals) {
-            try {
-                TerminalInfoResponse response = get(ctx.withTerminal(terminalId), "/api/v1/gateway/terminal")
-                        .retrieve().body(TerminalInfoResponse.class);
-                List<String> enabled = response == null || response.paymentMethods() == null ? List.of() : response.paymentMethods();
-                for (String method : enabled) {
-                    union.add(method);
-                    terminalByMethod.putIfAbsent(method, terminalId);
-                }
-                anyAnswered = true;
-                log.info("organizer={} banksim terminal {} trả được {} (đã tick {}, 3DS policy {})", organizerId, terminalId,
-                        enabled, response == null ? "?" : response.configuredPaymentMethods(),
-                        response == null ? "?" : response.threeDsPolicy());
-            } catch (RestClientResponseException ex) {
-                if (ex.getStatusCode().is4xxClientError()) {
-                    anyAnswered = true;
-                    log.warn("organizer={} gateway từ chối terminal {} ({})", organizerId, terminalId, ex.getStatusCode());
-                } else {
-                    log.warn("organizer={} gateway lỗi {} khi hỏi terminal {}", organizerId, ex.getStatusCode(), terminalId);
-                }
-            } catch (RuntimeException ex) {
-                log.warn("organizer={} không lấy được phương thức của terminal {}: {}", organizerId, terminalId, ex.toString());
-            }
+        Optional<java.util.Set<String>> methods;
+        try {
+            methods = Optional.of(java.util.Set.copyOf(merchantApi.paymentMethods(ctx)));
+            log.info("organizer={} banksim trả được {}", organizerId, methods.get());
+        } catch (com.example.demo.domain.common.DomainException ex) {
+            boolean refused = ex.getStatus().is4xxClientError();
+            log.warn("organizer={} gateway {} khi hỏi phương thức ({})", organizerId, refused ? "từ chối" : "lỗi", ex.getCode());
+            methods = refused ? Optional.of(java.util.Set.of()) : Optional.empty();
         }
-        Optional<java.util.Set<String>> methods = anyAnswered ? Optional.of(java.util.Set.copyOf(union)) : Optional.empty();
-        Routing routing = new Routing(terminals, methods, Map.copyOf(terminalByMethod), Instant.now());
-        supportedMethods.put(organizerId, routing);
-        return routing;
-    }
-
-    private String terminalFor(java.util.UUID organizerId, String method, String fallback) {
-        Routing routing = routing(organizerId);
-        if (routing == null) return fallback;
-        String chosen = routing.terminalByMethod().get(method);
-        return chosen != null ? chosen : routing.terminals().getFirst();
+        supportedMethods.put(organizerId, new CachedMethods(methods, Instant.now()));
+        return methods;
     }
 
     @Override
@@ -278,12 +242,7 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
         if (organizerId != null) supportedMethods.remove(organizerId);
     }
 
-    private record Routing(List<String> terminals, Optional<java.util.Set<String>> methods,
-                           Map<String, String> terminalByMethod, Instant freshAt) {}
-
-    private record TerminalInfoResponse(String merNo, String terminalId, String channel, String currency,
-                                        List<String> paymentMethods, String threeDsPolicy,
-                                        List<String> configuredPaymentMethods) {}
+    private record CachedMethods(Optional<java.util.Set<String>> methods, Instant freshAt) {}
 
     private record SupportedBins(java.util.Optional<java.util.Set<String>> bins, Instant freshAt) {}
 
@@ -333,7 +292,6 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
 
     private void headers(org.springframework.http.HttpHeaders h, GatewayCredentialResolver.GatewayMerchantContext c) {
             h.set("X-Merchant-No", c.merchantNo());
-            h.set("X-Terminal-Id", c.terminalId());
             h.set("X-Merchant-Secret", c.secret());
     }
 

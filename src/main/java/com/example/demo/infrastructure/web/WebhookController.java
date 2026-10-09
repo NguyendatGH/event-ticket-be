@@ -1,22 +1,26 @@
 package com.example.demo.infrastructure.web;
 
-import com.example.demo.application.PaymentService;
-import com.example.demo.application.RefundService;
-import com.example.demo.domain.payment.PaymentProvider;
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.security.SecurityRequirements;
-import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.servlet.http.HttpServletRequest;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Locale;
-import java.util.Map;
+import com.example.demo.application.PaymentService;
+import com.example.demo.application.RefundService;
+import com.example.demo.domain.payment.PaymentProvider;
+
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirements;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 
 @RestController
 @RequestMapping("/webhooks")
@@ -26,6 +30,7 @@ public class WebhookController {
 
     private final PaymentService payments;
     private final RefundService refunds;
+    private final Logger log = LoggerFactory.getLogger(WebhookController.class);
 
     public WebhookController(PaymentService payments, RefundService refunds) {
         this.payments = payments;
@@ -35,6 +40,7 @@ public class WebhookController {
     @PostMapping("/{provider:payos|mock-gateway}/payment")
     @Operation(summary = "Webhook thanh toán", description = "Sai chữ ký → 401. Còn lại luôn 200, body {result: PROCESSED|DUPLICATE|IGNORED}")
     public Map<String, Object> payment(@PathVariable String provider, @RequestBody String rawBody, HttpServletRequest request) {
+        log.info("Webhook received provider={} from={} bytes={}", provider, request.getRemoteAddr(), rawBody.length());
         return Map.of("result", payments.handleWebhook(providerOf(provider), rawBody, headers(request)));
     }
 

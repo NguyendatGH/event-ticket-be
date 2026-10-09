@@ -15,7 +15,7 @@ public interface GatewayAdminService {
     Object terminal(String terminalId);
     Object updateTerminal(String terminalId, String suffix, Map<String, Object> body);
     Object setTerminalStatus(String terminalId, String status);
-    Object setActiveTerminal(String merNo, String terminalId);
+    Object setDefaultTerminal(String merNo, String terminalId);
     Object acquirerConfigs(String merNo);
     Object addAcquirerConfig(String merNo, Map<String, Object> body);
     Object routingProfiles();
