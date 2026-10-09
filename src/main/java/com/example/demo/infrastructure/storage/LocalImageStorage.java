@@ -18,7 +18,7 @@ public class LocalImageStorage implements ImageStorage {
 
     @Override
     public String store(byte[] data, String folder, ImageType type) {
-        String name = UUID.randomUUID() + "." + type.extension;   // tên do server sinh, folder đã whitelist → không path traversal
+        String name = UUID.randomUUID() + "." + type.extension;
         try {
             Path dir = Files.createDirectories(root.resolve(folder));
             Files.write(dir.resolve(name), data);

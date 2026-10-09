@@ -7,7 +7,6 @@ import java.time.LocalDate;
 public record DashboardSummary(LocalDate from, LocalDate to, Metric revenue, Metric ticketsSold, Metric orders,
                                EventCounts events, TicketCounts tickets) {
 
-    /** {@code changePct} làm tròn 1 chữ số thập phân, null khi previous = 0 (không chia được). */
     public record Metric(long value, long previous, Double changePct) {
         public static Metric of(long value, long previous) {
             Double pct = previous == 0 ? null : BigDecimal.valueOf(value - previous).multiply(BigDecimal.valueOf(100))

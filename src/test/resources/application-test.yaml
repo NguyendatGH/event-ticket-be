@@ -11,6 +11,10 @@ app:
     client-id: test-client-id
     api-key: test-api-key
     checksum-key: test-checksum-key
+  bank-simulate:
+    # Test không được gọi gateway thật. .env (có BANK_SIMULATE_ADMIN_KEY thật) cũng được nạp khi test, thiếu dòng này
+    # thì BTC lưu tài khoản nhận tiền là gọi ra localhost:8090. Test nào cần gateway thì @MockitoBean BankSimAdminClient.
+    admin-key: ""
   mail:
     # Tắt SMTP trong test, cùng lý do với PayOS ở trên: test không được gọi ra ngoài.
     # Quan trọng vì IdentityFlowTests.forgotAndResetPassword() gọi /auth/forgot-password 3 lần,

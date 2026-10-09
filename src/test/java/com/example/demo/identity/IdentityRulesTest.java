@@ -12,7 +12,6 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Quy tắc thuần (không Spring, không DB) của tài khoản/BTC: slug BTC, nhận diện ảnh bằng magic bytes, chữ ký Cloudinary, opaque token. */
 class IdentityRulesTest {
 
     @Test
@@ -38,7 +37,6 @@ class IdentityRulesTest {
 
     @Test
     void cloudinarySignatureMatchesDocsExample() {
-        // Ví dụ trong https://cloudinary.com/documentation/authentication_signatures
         assertEquals("bfd09f95f331f558cbd1320e67aa8d488770583e", CloudinaryImageStorage.sign(Map.of(
                 "timestamp", "1315060510",
                 "public_id", "sample_image",

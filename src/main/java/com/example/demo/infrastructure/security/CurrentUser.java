@@ -7,10 +7,6 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import java.util.Optional;
 import java.util.UUID;
 
-/**
- * User hiện tại lấy từ claim {@code sub} của JWT đã verify. Dùng được cả ở endpoint permitAll:
- * có Bearer hợp lệ thì có id (vd gắn user_id vào đơn), không có thì empty.
- */
 public final class CurrentUser {
 
     private CurrentUser() {}
@@ -21,7 +17,6 @@ public final class CurrentUser {
                 : Optional.empty();
     }
 
-    /** Endpoint cần đăng nhập mà không có token → 401 UNAUTHORIZED (bình thường filter đã chặn trước). */
     public static UUID require() {
         return id().orElseThrow(() -> DomainException.unauthorized("UNAUTHORIZED", "Bạn cần đăng nhập để tiếp tục"));
     }

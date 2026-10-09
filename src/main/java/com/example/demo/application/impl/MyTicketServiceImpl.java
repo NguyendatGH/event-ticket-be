@@ -22,10 +22,6 @@ import java.util.UUID;
 
 import static com.example.demo.application.support.SqlRows.instant;
 
-/**
- * "Vé của tôi" (GET /me/tickets, /me/tickets/{id}, MyTicketsController) và lịch sử vé.
- * Đọc bằng JdbcClient: một query join vé + hạng vé + sự kiện + đơn cho cả trang (không N+1).
- */
 @Service
 public class MyTicketServiceImpl implements MyTicketService {
 
@@ -44,7 +40,6 @@ public class MyTicketServiceImpl implements MyTicketService {
                    e.cover_image_url, e.status event_status
             """;
 
-    /** Điều kiện thêm vào sau "where t.owner_id = :owner" và thứ tự sắp xếp của từng tab. */
     private record Scope(String extraWhere, String orderBy) {}
 
     private final JdbcClient jdbc;
@@ -55,7 +50,6 @@ public class MyTicketServiceImpl implements MyTicketService {
         this.json = json;
     }
 
-    /** scope = upcoming (mặc định) | past | all. */
     @Override
     public PageResponse<MyTicketResponse> page(UUID owner, String scope, int page, int size) {
         Scope sc = switch (scope == null ? "upcoming" : scope) {
@@ -79,7 +73,6 @@ public class MyTicketServiceImpl implements MyTicketService {
         return Pages.response(content, pg, sz, total);
     }
 
-    /** Chỉ chủ vé thấy; vé của người khác cũng 404 để không lộ là vé đó có tồn tại. */
     @Override
     public MyTicketResponse detail(UUID owner, UUID ticketId) {
         Instant now = Instant.now();
@@ -90,7 +83,6 @@ public class MyTicketServiceImpl implements MyTicketService {
         return ticket.withHistory(history(owner, ticket));
     }
 
-    /** Vé chỉ có một mốc: phát hành cho chủ vé (chủ vé không đổi sau khi cấp), suy ra từ vé + tên chủ vé. */
     private List<TicketHistoryItem> history(UUID owner, MyTicketResponse ticket) {
         String ownerName = jdbc.sql("select full_name from users where id = :id").param("id", owner)
                 .query(String.class).single();
@@ -112,7 +104,6 @@ public class MyTicketServiceImpl implements MyTicketService {
                 rs.getObject("order_id", UUID.class), rs.getLong("order_code"), null);
     }
 
-    /** Cột jsonb venue được select dạng text ({@code e.venue::text}) rồi parse lại thành record Venue. */
     Venue parseVenue(String raw) {
         return raw == null ? null : json.readValue(raw, Venue.class);
     }

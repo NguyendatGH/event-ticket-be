@@ -10,10 +10,6 @@ import org.springframework.stereotype.Component;
 
 import java.util.UUID;
 
-/**
- * Kiểm quyền sở hữu cho /organizer/events. SecurityConfig chỉ chặn theo role nên service phải tự hỏi
- * "sự kiện này có phải của BTC đang đăng nhập không". Của BTC khác → 404 (không phải 403) để không lộ id có tồn tại.
- */
 @Component
 public class OrganizerAccessImpl implements OrganizerAccess {
 
@@ -25,14 +21,12 @@ public class OrganizerAccessImpl implements OrganizerAccess {
         this.events = events;
     }
 
-    /** Hồ sơ BTC của user. Không có hồ sơ (kể cả ADMIN) → 404 ORGANIZER_NOT_FOUND. */
     @Override
     public Organizer currentOrganizer(UUID userId) {
         return organizers.findByUserId(userId)
                 .orElseThrow(() -> DomainException.notFound("ORGANIZER_NOT_FOUND", "Tài khoản chưa có hồ sơ ban tổ chức"));
     }
 
-    /** Sự kiện của BTC đang đăng nhập, đọc bình thường (không khóa). */
     @Override
     public Event ownEvent(UUID userId, UUID eventId) {
         UUID organizerId = currentOrganizer(userId).getId();
@@ -41,10 +35,6 @@ public class OrganizerAccessImpl implements OrganizerAccess {
                 .orElseThrow(() -> eventNotFound(eventId));
     }
 
-    /**
-     * Như {@link #ownEvent} nhưng khóa dòng event (SELECT ... FOR UPDATE) tới hết transaction.
-     * Dùng khi sửa/publish: hai request sửa cùng một sự kiện sẽ chạy lần lượt thay vì ghi đè lẫn nhau.
-     */
     @Override
     public Event ownEventLocked(UUID userId, UUID eventId) {
         UUID organizerId = currentOrganizer(userId).getId();

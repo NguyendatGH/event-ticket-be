@@ -14,7 +14,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.UUID;
 
-/** Tra soát một đơn cho ADMIN (AdminController, GET /admin/orders/{id}/audit). */
 @Service
 public class AdminAuditServiceImpl implements AdminAuditService {
 
@@ -31,7 +30,6 @@ public class AdminAuditServiceImpl implements AdminAuditService {
         this.callLogs = callLogs;
     }
 
-    /** Webhook của payment mới nhất (tra theo tiền tố providerPaymentId) + gateway_call_logs của đơn. */
     @Override
     @Transactional(readOnly = true)
     public OrderAudit audit(UUID orderId) {

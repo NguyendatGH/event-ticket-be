@@ -24,12 +24,6 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 import java.sql.SQLException;
 import java.util.Map;
 
-/**
- * Mọi lỗi ra problem+json (RFC 9457) kèm {@code code} và {@code traceId}; lỗi validation thêm {@code errors[]}.
- * Kế thừa ResponseEntityExceptionHandler để lỗi MVC chuẩn cũng đi qua {@link #createResponseEntity}.
- * 401/403 từ filter Spring Security không tới đây (xem SecurityConfig). AccessDeniedException từ {@code @PreAuthorize}
- * cố ý KHÔNG bắt, để ExceptionTranslationFilter phân biệt chưa đăng nhập → 401 và đã đăng nhập → 403.
- */
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
@@ -51,7 +45,6 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(BadCredentialsException.class)
     ProblemDetail badCredentials() {
-        // Không nói rõ sai email hay sai password để tránh lộ email nào đã đăng ký
         return problem(HttpStatus.UNAUTHORIZED, "BAD_CREDENTIALS", "Email hoặc mật khẩu không đúng");
     }
 
@@ -60,16 +53,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return problem(HttpStatus.BAD_REQUEST, "MISSING_HEADER", "Thiếu header " + e.getHeaderName());
     }
 
-    /** Để Spring Security tự xử lý (401/403 problem+json ở SecurityConfig), không rơi vào catch-all bên dưới. */
     @ExceptionHandler({AccessDeniedException.class, AuthenticationException.class})
     void rethrowSecurity(RuntimeException e) {
         throw e;
     }
 
-    /**
-     * Vi phạm unique do hai request chạy đua (đăng ký trùng email, bấm Thanh toán hai lần cùng Idempotency-Key):
-     * kiểm tra trước trong service đã qua nhưng DB chặn. Trả 409 để FE báo thử lại. Vi phạm khác (NOT NULL, FK) là bug → 500.
-     */
     @ExceptionHandler(DataIntegrityViolationException.class)
     ProblemDetail dataIntegrity(DataIntegrityViolationException e) {
         if (e.getMostSpecificCause() instanceof SQLException sql && "23505".equals(sql.getSQLState())) {
@@ -79,7 +67,6 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return unexpected(e);
     }
 
-    /** Lưới cuối: mọi lỗi chưa lường trước là 500 problem+json có traceId, không lộ stack trace ra client. */
     @ExceptionHandler(Exception.class)
     ProblemDetail unexpected(Exception e) {
         log.error("Lỗi không mong đợi", e);
@@ -103,7 +90,6 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return handleExceptionInternal(ex, pd, headers, HttpStatus.CONTENT_TOO_LARGE, request);
     }
 
-    /** Điểm ra chung của lớp cha: bảo đảm mọi ProblemDetail đều có code và traceId. */
     @Override
     protected ResponseEntity<Object> createResponseEntity(Object body, HttpHeaders headers, HttpStatusCode status,
                                                           WebRequest request) {

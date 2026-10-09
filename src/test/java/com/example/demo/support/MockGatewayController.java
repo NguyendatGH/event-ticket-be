@@ -27,11 +27,6 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
-/**
- * Nút bấm của test double (chỉ có ở src/test): mô phỏng khách trả tiền
- * rồi provider gọi webhook vào POST /webhooks/mock-gateway/payment của chính app này, qua HTTP thật.
- * Công cụ dev/test nên CỐ Ý đọc repository trực tiếp (ngoại lệ duy nhất của quy tắc controller → service → repository).
- */
 @RestController
 @RequestMapping("/mock-gateway/payments")
 @Profile("test")
@@ -80,7 +75,7 @@ public class MockGatewayController {
         long paid = amount != null ? amount : order.getTotalAmount();
         String ref = "MOCK" + System.currentTimeMillis();
         Instant now = Instant.now();
-        if (success) mock.markPaid(pid, paid, ref, now);   // trước khi gửi webhook: poll thấy PAID kể cả khi webhook bị từ chối
+        if (success) mock.markPaid(pid, paid, ref, now);
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("eventId", pid + ":" + ref);
@@ -89,7 +84,7 @@ public class MockGatewayController {
         body.put("success", success);
         body.put("amount", paid);
         body.put("transactionRef", ref);
-        if (success) body.put("paidAt", now.toString());   // giao dịch thất bại không có thời điểm thanh toán
+        if (success) body.put("paidAt", now.toString());
         body.put("payerBankBin", payerBankBin != null ? payerBankBin : "970422");
         body.put("payerAccountNumber", "0123456789012");
         String raw = json.writeValueAsString(body);
@@ -100,7 +95,7 @@ public class MockGatewayController {
 
     private void postWebhook(String raw, String signature) {
         String port = env.getProperty("local.server.port", env.getProperty("server.port", "8080"));
-        RestClient.builder().defaultStatusHandler(s -> true, (req, res) -> { }).build()   // 401 khi ký sai là kết quả mong đợi
+        RestClient.builder().defaultStatusHandler(s -> true, (req, res) -> { }).build()
                 .post().uri("http://localhost:" + port + "/webhooks/mock-gateway/payment")
                 .contentType(MediaType.APPLICATION_JSON).header("X-Mock-Signature", signature)
                 .body(raw).retrieve().toBodilessEntity();

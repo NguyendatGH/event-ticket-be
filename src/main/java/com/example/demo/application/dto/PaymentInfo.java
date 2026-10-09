@@ -8,10 +8,6 @@ import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.Instant;
 
-/**
- * Kèm tài khoản người trả để màn hoàn vé điền sẵn đích nhận. Chỉ lộ ở GET /orders/{id} (kiểm chủ đơn),
- * và đó là tài khoản của chính người đang xem.
- */
 public record PaymentInfo(PaymentProvider provider, PaymentStatus status, String checkoutUrl, String paymentLinkId,
                           String qrCode, String transactionRef, Instant paidAt,
                           @Schema(nullable = true, description = "Số tài khoản đã thanh toán, để điền sẵn khi hoàn vé")
@@ -23,7 +19,7 @@ public record PaymentInfo(PaymentProvider provider, PaymentStatus status, String
 
     static PaymentInfo from(Payment p) {
         return p == null ? null : new PaymentInfo(p.getProvider(), p.getStatus(), p.getCheckoutUrl(),
-                p.getPaymentLinkId(), null, p.getProviderTransactionRef(), p.getPaidAt(),
+                p.getPaymentLinkId(), p.getQrCode(), p.getProviderTransactionRef(), p.getPaidAt(),
                 p.getPayerAccountNumber(), p.getPayerBankBin(), BankBins.nameOf(p.getPayerBankBin()));
     }
 }

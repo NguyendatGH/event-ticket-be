@@ -1,5 +1,6 @@
 package com.example.demo.infrastructure.web;
 
+import com.example.demo.domain.common.LogContext;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -15,8 +16,12 @@ class TraceIdFilterTest {
 
     private String run(MockHttpServletRequest req, MockHttpServletResponse res) throws Exception {
         AtomicReference<String> seenInChain = new AtomicReference<>();
-        filter.doFilter(req, res, (rq, rs) -> seenInChain.set(MDC.get(TraceIdFilter.MDC_KEY)));
+        filter.doFilter(req, res, (rq, rs) -> {
+            seenInChain.set(MDC.get(TraceIdFilter.MDC_KEY));
+            LogContext.trade("MerNo000001", "TerNo000001", "TradeNo000001");
+        });
         assertThat(MDC.get(TraceIdFilter.MDC_KEY)).as("MDC phải được dọn sau request").isNull();
+        assertThat(MDC.get(LogContext.TRADE_NO)).as("mã giao dịch không được lọt sang request sau").isNull();
         return seenInChain.get();
     }
 

@@ -22,11 +22,6 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * Nền chung cho mọi tính năng (ui-api-contract §2, §4.7, §5): Flyway V1+V2 khớp Hibernate validate, file seed chạy lại
- * được (idempotent) và nhất quán (kho = tổng − đã bán), event nhúng organizer từ bảng organizers, DRAFT ẩn với public,
- * ma trận quyền /organizer/**.
- */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "app.jwt.secret=test-secret-test-secret-test-secret-1234",
         "DB_URL=unused", "DB_USERNAME=unused", "DB_PASSWORD=unused"
@@ -47,7 +42,6 @@ class FoundationTests {
     @LocalServerPort int port;
     @Autowired JdbcTemplate jdbc;
 
-    /** Chạy đúng file DevDataSeeder dùng (classpath seed/seed-dev.sql) hai lần: lần hai không được lỗi hay nhân đôi. */
     @BeforeAll
     void seedTwice() throws Exception {
         String sql = new ClassPathResource("seed/seed-dev.sql").getContentAsString(StandardCharsets.UTF_8);

@@ -14,7 +14,6 @@ class StorageConfigTest {
         String url = composeCloudinaryUrl("demo-cloud", "123456789012345", "abcDEF-secret");
 
         assertThat(url).isEqualTo("cloudinary://123456789012345:abcDEF-secret@demo-cloud");
-        // CloudinaryImageStorage parse lại đúng 3 phần này
         assertThat(URI.create(url).getHost()).isEqualTo("demo-cloud");
         assertThat(URI.create(url).getRawUserInfo().split(":", 2)).containsExactly("123456789012345", "abcDEF-secret");
     }

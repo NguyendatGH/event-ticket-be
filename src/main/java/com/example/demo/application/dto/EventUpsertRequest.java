@@ -11,10 +11,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * Tạo/sửa sự kiện của BTC. Lưu nháp chỉ bắt buộc name, field có mặt thì phải hợp lệ (điều kiện publish ở
- * Event.publishProblems). {@code tiers} là tập đầy đủ — tier cũ vắng mặt = xóa, null = giữ nguyên.
- */
 public record EventUpsertRequest(
         @NotBlank(message = "Tên sự kiện không được trống") @Size(max = 200) String name,
         @Pattern(regexp = "music|theatre|sport|conference|exhibition|workshop", message = "Danh mục không hợp lệ") String category,
@@ -34,7 +30,6 @@ public record EventUpsertRequest(
             @NotBlank @Pattern(regexp = "([01]\\d|2[0-3]):[0-5]\\d", message = "Giờ phải dạng HH:mm") String time,
             @NotBlank @Size(max = 200) String title) {}
 
-    /** id null = tier mới. price/totalQuantity trống coi là 0, maxPerOrder trống là 6 (mặc định DB). */
     public record TierInput(
             UUID id,
             @NotBlank(message = "Tên hạng vé không được trống") @Size(max = 200) String name,

@@ -15,7 +15,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/** Mỗi 5 phút đối chiếu đơn PENDING sắp hết hạn với provider, phòng webhook rớt. */
 @Component
 public class PaymentReconcileJob {
 
@@ -30,7 +29,6 @@ public class PaymentReconcileJob {
         this.payments = payments;
     }
 
-    // GIỚI HẠN: không ShedLock, giả định chỉ chạy một instance
     @Scheduled(fixedDelayString = "PT5M", initialDelayString = "PT5M")
     public void run() {
         MDC.put("trace_id", UUID.randomUUID().toString());

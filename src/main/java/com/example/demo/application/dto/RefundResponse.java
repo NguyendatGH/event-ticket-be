@@ -39,7 +39,6 @@ public record RefundResponse(
                 r.getReason(), r.getAttempt(), r.getSubmittedAt(), r.getCreatedAt(), r.getUpdatedAt());
     }
 
-    /** Số tài khoản chỉ lộ 4 số cuối ra ngoài API, kể cả cho admin. */
     static String mask(String account) {
         if (account == null || account.length() <= 4) return account;
         return "*".repeat(account.length() - 4) + account.substring(account.length() - 4);

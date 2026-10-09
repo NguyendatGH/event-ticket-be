@@ -20,11 +20,6 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * Hoàn tiền phía ban tổ chức. Tiền nằm ở tài khoản nhận của BTC chứ không phải của sàn, nên refund tới
- * tài khoản khác tài khoản đã thanh toán do CHÍNH BTC duyệt. Quyền theo role ở SecurityConfig
- * (/api/v1/organizer/**), quyền trên từng refund kiểm trong service: refund của BTC khác trả 404.
- */
 @RestController
 @RequestMapping("/api/v1/organizer/refunds")
 @Tag(name = "Organizer refunds", description = "Ban tổ chức duyệt và theo dõi hoàn tiền của sự kiện mình")

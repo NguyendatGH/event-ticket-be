@@ -25,10 +25,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
 
-/**
- * /api/v1/organizer/events: BTC quản lý sự kiện của mình. Đọc → OrganizerEventQueries, ghi → OrganizerEventService.
- * Quyền ORGANIZER/ADMIN do SecurityConfig chặn ở /api/v1/organizer/**; "sự kiện có phải của mình không" kiểm tra trong service.
- */
 @RestController
 @RequestMapping("/api/v1/organizer/events")
 @Tag(name = "Organizer events", description = "BTC tạo, sửa, publish, xóa nháp sự kiện và xem đơn")

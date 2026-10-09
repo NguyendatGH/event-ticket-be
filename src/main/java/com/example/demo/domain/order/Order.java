@@ -66,7 +66,6 @@ public class Order {
     @Column(name = "idempotency_key", length = 100)
     private String idempotencyKey;
 
-    /** Gán trong markPaid; dashboard bucket doanh thu theo cột này. */
     @Column(name = "paid_at")
     private Instant paidAt;
 
@@ -82,7 +81,7 @@ public class Order {
 
     @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true)
     @JoinColumn(name = "order_id", nullable = false)
-    @BatchSize(size = 50)   
+    @BatchSize(size = 50)
     private List<OrderItem> items = new ArrayList<>();
 
 

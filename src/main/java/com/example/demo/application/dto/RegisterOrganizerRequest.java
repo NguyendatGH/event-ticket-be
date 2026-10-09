@@ -6,7 +6,6 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
-/** Đăng ký tài khoản ORGANIZER kèm hồ sơ BTC trong một bước. Field tùy chọn gửi "" coi như bỏ trống. */
 public record RegisterOrganizerRequest(
         @Schema(example = "Nguyen Van C") @NotBlank @Size(max = 200) String fullName,
         @Schema(example = "c@example.com") @NotBlank @Email @Size(max = 200) String email,

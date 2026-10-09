@@ -10,10 +10,6 @@ import org.springframework.stereotype.Component;
 
 import java.util.Comparator;
 
-/**
- * Chỗ DUY NHẤT đơn tác động lên vé/kho, để webhook, poll và mọi đường hủy cho cùng kết quả.
- * Luôn gọi trong transaction đang giữ khóa order. PAID → cấp vé; hủy/hết hạn → trả kho.
- */
 @Component
 public class OrderFulfilmentImpl implements OrderFulfilment {
 
@@ -25,7 +21,6 @@ public class OrderFulfilmentImpl implements OrderFulfilment {
         this.inventory = inventory;
     }
 
-    /** Gọi ngay sau {@code order.markPaid}. Trả số vé đã cấp. */
     @Override
     public int fulfil(Order order) {
         int issued = 0;
@@ -38,11 +33,10 @@ public class OrderFulfilmentImpl implements OrderFulfilment {
         return issued;
     }
 
-    /** Đơn rời PENDING_PAYMENT mà không PAID (hủy, hết hạn, provider từ chối tạo link): trả vé về kho. */
     @Override
     public void release(Order order) {
         order.getItems().stream()
-                .sorted(Comparator.comparing(OrderItem::getTicketTierId))   // cùng thứ tự khóa với checkout
+                .sorted(Comparator.comparing(OrderItem::getTicketTierId))
                 .forEach(i -> inventory.findWithLockByTicketTierId(i.getTicketTierId())
                         .ifPresent(inv -> inv.release(i.getQuantity())));
     }

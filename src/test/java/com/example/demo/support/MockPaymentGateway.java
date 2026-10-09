@@ -34,12 +34,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * Test double cho {@link com.example.demo.domain.payment.PaymentGatewayPort}. CHỈ sống ở src/test:
- * app chạy thật luôn dùng PayOsPaymentGateway. Link giữ trong bộ nhớ, webhook ký HMAC-SHA256 bằng
- * app.payment.mock-secret (header X-Mock-Signature). {@link MockGatewayController} bấm nút giả lập.
- * Component scan của @SpringBootTest quét cả test-classes nên @Profile("test") là đủ để nó thay PayOS.
- */
 @Component
 @Profile("test")
 public class MockPaymentGateway implements PaymentGatewayPort {
@@ -47,7 +41,6 @@ public class MockPaymentGateway implements PaymentGatewayPort {
     public static final String SIGNATURE_HEADER = "x-mock-signature";
     private static final Logger log = LoggerFactory.getLogger(MockPaymentGateway.class);
 
-    /** Trạng thái một link ở "provider". Volatile vì controller và job đọc ghi từ thread khác nhau. */
     public static final class Link {
         public final long orderCode;
         public final long amount;
@@ -59,9 +52,8 @@ public class MockPaymentGateway implements PaymentGatewayPort {
         Link(long orderCode, long amount) { this.orderCode = orderCode; this.amount = amount; }
     }
 
-    // GIỚI HẠN: lưu trong RAM, restart là mất; getPaymentStatus link lạ trả PENDING để job hết hạn vẫn đóng đơn được
     private final Map<String, Link> links = new ConcurrentHashMap<>();
-    private final Map<String, MockRefund> refunds = new ConcurrentHashMap<>();        // theo providerRefundId
+    private final Map<String, MockRefund> refunds = new ConcurrentHashMap<>();
     private final Map<String, String> refundIdByReference = new ConcurrentHashMap<>();
     private final AtomicLong payoutBalance;
     private final AtomicLong payoutReserved = new AtomicLong();
@@ -85,11 +77,9 @@ public class MockPaymentGateway implements PaymentGatewayPort {
 
     @Override
     public PaymentLink createPaymentLink(CreatePaymentCommand command) {
-        // Cửa test cho nhánh "provider từ chối": tổng tiền có 3 số cuối là 013
         if (command.amount() % 1000 == 13) throw new IllegalStateException("mock provider từ chối tạo link (amount % 1000 == 13)");
         String id = "mock_" + command.orderCode();
         links.put(id, new Link(command.orderCode(), command.amount()));
-        // Lấy orderId từ ?orderId= của returnUrl để FE mở đúng đơn; PaymentLink không mang orderId
         String orderId = queryParam(command.returnUrl(), "orderId");
         return new PaymentLink(id, checkoutBase + "/" + (orderId != null ? orderId : command.orderCode()), null);
     }
@@ -120,7 +110,6 @@ public class MockPaymentGateway implements PaymentGatewayPort {
                 paidAt.isBlank() ? null : Instant.parse(paidAt), n.path("payerBankBin").asText(), n.path("payerAccountNumber").asText(), rawBody);
     }
 
-    /* ---- dành cho MockGatewayController ---- */
 
     public String sign(String body) {
         try {
@@ -145,12 +134,7 @@ public class MockPaymentGateway implements PaymentGatewayPort {
         if (l != null && l.status == PaymentStatusResult.Status.PENDING) l.status = PaymentStatusResult.Status.EXPIRED;
     }
 
-    /* ================= Refund: ví chi giả lập ================= */
 
-    /**
-     * Mô phỏng đúng cách ví thật hoạt động, để WalletService không phải viết riêng cho mock:
-     * balance chỉ trừ khi lệnh SUCCEEDED, reserved giữ tiền của lệnh đang bay.
-     */
     public static final class MockRefund {
         public final String id;
         public final String referenceId;
@@ -167,13 +151,11 @@ public class MockPaymentGateway implements PaymentGatewayPort {
 
     @Override
     public synchronized RefundSubmitResult submitRefund(RefundCommand c) {
-        // Idempotent theo referenceId như x-idempotency-key của PayOS: gửi lại cùng key thì trả lệnh cũ, không giữ tiền lần hai
         String existingId = refundIdByReference.get(c.referenceId());
         if (existingId != null) {
             MockRefund old = refunds.get(existingId);
             return new RefundSubmitResult(old.id, old.status, "{\"replayed\":true,\"id\":\"" + old.id + "\"}");
         }
-        // Cửa test: số tài khoản tận cùng 000 -> provider từ chối đích
         if (c.toAccountNumber() == null || c.toAccountNumber().endsWith("000")) {
             throw new GatewayRejectedException("INVALID_DESTINATION", "mock: tài khoản thụ hưởng không hợp lệ");
         }
@@ -185,7 +167,6 @@ public class MockPaymentGateway implements PaymentGatewayPort {
         refunds.put(r.id, r);
         refundIdByReference.put(c.referenceId(), r.id);
         payoutReserved.addAndGet(c.amount());
-        // Cửa test timeout: provider ĐÃ nhận lệnh nhưng response không về. Gọi lại cùng referenceId sẽ trúng nhánh replay ở trên.
         if (timeoutNextSubmit.compareAndSet(true, false)) {
             throw new GatewayTimeoutException("mock: timeout sau khi provider đã nhận lệnh " + r.id);
         }
@@ -210,6 +191,17 @@ public class MockPaymentGateway implements PaymentGatewayPort {
         return payoutBalance.get();
     }
 
+    private final Map<java.util.UUID, java.util.Set<String>> terminalMethods = new ConcurrentHashMap<>();
+
+    public void setTerminalMethods(java.util.UUID organizerId, java.util.Set<String> methods) {
+        terminalMethods.put(organizerId, methods);
+    }
+
+    @Override
+    public Optional<java.util.Set<String>> supportedPaymentMethods(java.util.UUID organizerId) {
+        return Optional.ofNullable(terminalMethods.get(organizerId));
+    }
+
     @Override
     public RefundEvent verifyAndParseRefund(String rawBody, Map<String, String> headers) {
         requireValidSignature(rawBody, headers);
@@ -231,9 +223,7 @@ public class MockPaymentGateway implements PaymentGatewayPort {
         return new RefundStatusResult(r.status, r.id, r.failureCode, r.failureCode == null ? null : "mock: " + r.failureCode, null);
     }
 
-    /* ---- nút bấm cho MockRefundGatewayController ---- */
 
-    /** Chốt kết quả một lệnh: SUCCEEDED trừ ví thật, FAILED/CANCELLED nhả reserve, ON_HOLD giữ nguyên. Gọi lặp không đổi gì. */
     public synchronized MockRefund settleRefund(String providerRefundId, RefundStatusResult.Status next, String failureCode) {
         MockRefund r = refunds.get(providerRefundId);
         if (r == null) throw new IllegalArgumentException("mock: không có lệnh chi " + providerRefundId);

@@ -5,10 +5,6 @@ import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.Instant;
 
-/**
- * Một dòng lịch sử vé. Tên người đã che: "Tran Thi B" → "Tran B.".
- * Không lưu bảng riêng: vé chỉ có một mốc (phát hành cho chủ vé), suy ra từ chính dòng tickets.
- */
 public record TicketHistoryItem(
         @Schema(allowableValues = "ISSUED") String type,
         @Schema(nullable = true) Long price,

@@ -4,7 +4,9 @@ import com.example.demo.application.CheckoutService;
 import com.example.demo.application.GatewayAudit;
 import com.example.demo.application.LedgerService;
 import com.example.demo.application.OrderFulfilment;
+import com.example.demo.application.PaymentGatewayRegistry;
 import com.example.demo.application.PaymentService;
+import com.example.demo.application.SellerWalletService;
 import com.example.demo.application.dto.OrderResponse;
 import com.example.demo.domain.common.DomainException;
 import com.example.demo.domain.common.LogContext;
@@ -29,6 +31,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 import static com.example.demo.domain.payment.WebhookProcessingResult.*;
@@ -43,23 +46,25 @@ public class PaymentServiceImpl implements PaymentService {
     private final PaymentRepository payments;
     private final OrderFulfilment fulfilment;
     private final WebhookEventRepository webhookEvents;
-    private final PaymentGatewayPort gateway;
+    private final PaymentGatewayRegistry gateways;
     private final GatewayAudit audit;
     private final LedgerService ledger;
+    private final SellerWalletService sellerWallet;
     private final CheckoutService checkout;
     private final TransactionTemplate tx;
     private final ObjectMapper json;
 
     public PaymentServiceImpl(OrderRepository orders, PaymentRepository payments, OrderFulfilment fulfilment,
-                              WebhookEventRepository webhookEvents, PaymentGatewayPort gateway, GatewayAudit audit, LedgerService ledger,
-                              CheckoutService checkout, TransactionTemplate tx, ObjectMapper json) {
+                              WebhookEventRepository webhookEvents, PaymentGatewayRegistry gateways, GatewayAudit audit, LedgerService ledger,
+                              SellerWalletService sellerWallet, CheckoutService checkout, TransactionTemplate tx, ObjectMapper json) {
         this.orders = orders;
         this.payments = payments;
         this.fulfilment = fulfilment;
         this.webhookEvents = webhookEvents;
-        this.gateway = gateway;
+        this.gateways = gateways;
         this.audit = audit;
         this.ledger = ledger;
+        this.sellerWallet = sellerWallet;
         this.checkout = checkout;
         this.tx = tx;
         this.json = json;
@@ -67,9 +72,7 @@ public class PaymentServiceImpl implements PaymentService {
 
     @Override
     public WebhookProcessingResult handleWebhook(PaymentProvider provider, String rawBody, Map<String, String> headers) {
-        if (gateway.provider() != provider) {
-            throw DomainException.notFound("PROVIDER_INACTIVE", "Provider " + provider + " không hoạt động ở profile này");
-        }
+        PaymentGatewayPort gateway = gateways.forProvider(provider);
         try (LogContext.Scope ignored = LogContext.of(provider.name())) {
             PaymentEvent event;
             try {
@@ -80,7 +83,8 @@ public class PaymentServiceImpl implements PaymentService {
                 tx.executeWithoutResult(s -> webhookEvents.save(WebhookEvent.rejected(provider, audit.jsonOrWrapped(rawBody))));
                 throw ex;
             }
-            LogContext.orderCode(event.orderCode());   // chỉ biết orderCode sau khi parse được payload
+            LogContext.orderCode(event.orderCode());
+            LogContext.trade(null, null, event.providerPaymentId());
             return record(provider, "payment", event);
         }
     }
@@ -91,8 +95,11 @@ public class PaymentServiceImpl implements PaymentService {
         try {
             saved = tx.execute(s -> webhookEvents.saveAndFlush(WebhookEvent.received(provider, event.eventId(), eventType, event.rawPayload())));
         } catch (DataIntegrityViolationException duplicate) {
-            log.info("Webhook trùng {} {}: bỏ qua", provider, event.eventId());
-            return DUPLICATE;
+            if (webhookEvents.findByProviderAndEventId(provider, event.eventId()).isPresent()) {
+                log.info("Webhook trùng {} {}: bỏ qua", provider, event.eventId());
+                return DUPLICATE;
+            }
+            throw duplicate;
         }
         try {
             return tx.execute(s -> apply(event, saved.getId()));
@@ -106,29 +113,42 @@ public class PaymentServiceImpl implements PaymentService {
         WebhookEvent webhook = webhookEvents.findById(webhookId).orElseThrow();
         Order order = orders.findWithLockByOrderCode(e.orderCode()).orElse(null);
         Payment payment = order == null ? null : payments.findFirstByOrderIdOrderByCreatedAtDesc(order.getId()).orElse(null);
+        if (payment != null) LogContext.trade(payment.getGatewayMerchantNo(), payment.getGatewayTerminalId(), null);
 
         WebhookProcessingResult result;
         if (order == null || payment == null) {
             log.warn("Webhook cho orderCode {} không khớp đơn nào: bỏ qua", e.orderCode());
             result = IGNORED;
+        } else if (!Objects.equals(e.providerPaymentId(), payment.getProviderPaymentId())
+                || e.providerPaymentId() == null || e.providerPaymentId().isBlank()) {
+            log.warn("Webhook {} có providerPaymentId không khớp payment của order {}: bỏ qua", e.eventId(), order.getOrderCode());
+            result = IGNORED;
         } else if (order.getStatus() == OrderStatus.PAID) {
             log.info("[+] Trạng thái đơn hàng : PAID ");
-            result = IGNORED;                                              // đã PAID, gửi lại không đổi gì
+            result = IGNORED;
         } else if (!e.success()) {
             if (order.isPending() && payment.isAwaitingMoney()) {
-                payment.markFailed(e);                                     // khách có thể trả lại trên cùng link tới khi hết hạn
+                payment.markFailed(e);
                 result = PROCESSED;
             } else {
-                result = IGNORED;                                          // không ghi đè UNDERPAID/PAID_LATE/EXPIRED
+                result = IGNORED;
             }
+        } else if (order.isPending() && payment.getStatus() == com.example.demo.domain.payment.PaymentStatus.OVERPAID) {
+            log.warn("Order {} đã nhận OVERPAID; giữ nguyên để manual review, không tự động settle lại", order.getOrderCode());
+            result = IGNORED;
         } else if (order.isPending()) {
             if (e.amount() < order.getTotalAmount()) {
                 log.warn("Order {} nhận thiếu tiền: {} / {}", order.getOrderCode(), e.amount(), order.getTotalAmount());
                 payment.markUnderpaid(e);
+            } else if (e.amount() > order.getTotalAmount()) {
+                log.error("Order {} nhận thừa tiền: {} / {}. Không tự động settle, chuyển manual review khi đóng đơn.",
+                        order.getOrderCode(), e.amount(), order.getTotalAmount());
+                payment.markOverpaid(e);
             } else {
                 payment.confirmPaid(e);
                 order.markPaid(e.amount());
                 ledger.recordOrderPaid(order);
+                sellerWallet.recordPayment(order);
                 int n = fulfilment.fulfil(order);
                 log.info("Order {} PAID, {} vé", order.getOrderCode(), n);
             }
@@ -146,27 +166,30 @@ public class PaymentServiceImpl implements PaymentService {
         return result;
     }
 
-    /** OrderExpiryJob: hỏi provider một lần rồi mới hết hạn. Trả PAID / EXPIRED / SKIPPED. */
     @Override
     public String settleExpired(UUID orderId) {
         Order order = orders.findById(orderId).orElse(null);
         if (order == null || !order.isPending()) return "SKIPPED";
+        Payment payment = payments.findFirstByOrderIdOrderByCreatedAtDesc(orderId).orElse(null);
+        PaymentGatewayPort gateway = payment == null ? gateways.defaultGateway() : gateways.forProvider(payment.getProvider());
         try (LogContext.Scope ignored = LogContext.order(gateway.provider().name(), order.getOrderCode())) {
-            Payment payment = payments.findFirstByOrderIdOrderByCreatedAtDesc(orderId).orElse(null);
             if (payment != null && pollAndApply(order, payment)) return "PAID";
             if (!checkout.expire(orderId)) return "SKIPPED";
             if (payment != null) checkout.cancelLinkQuietly(payment, "order expired");
-            return "EXPIRED";
+            return orders.findById(orderId)
+                    .map(o -> o.getStatus() == OrderStatus.MANUAL_REVIEW ? "MANUAL_REVIEW" : "EXPIRED")
+                    .orElse("SKIPPED");
         }
     }
 
-    /** PaymentReconcileJob: đơn sắp hết hạn, đối chiếu với provider phòng webhook rớt. */
     @Override
     public boolean reconcile(UUID orderId) {
         Order order = orders.findById(orderId).orElse(null);
         if (order == null || !order.isPending()) return false;
+        Payment payment = payments.findFirstByOrderIdOrderByCreatedAtDesc(orderId).orElse(null);
+        PaymentGatewayPort gateway = payment == null ? gateways.defaultGateway() : gateways.forProvider(payment.getProvider());
         try (LogContext.Scope ignored = LogContext.order(gateway.provider().name(), order.getOrderCode())) {
-            return payments.findFirstByOrderIdOrderByCreatedAtDesc(orderId).map(p -> pollAndApply(order, p)).orElse(false);
+            return payment != null && pollAndApply(order, payment);
         }
     }
 
@@ -174,7 +197,9 @@ public class PaymentServiceImpl implements PaymentService {
     public OrderResponse cancelOrder(UUID userId, UUID orderId) {
         Order order = orders.findById(orderId)
                 .orElseThrow(() -> DomainException.notFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng"));
-        order.requireOwner(userId);          // kiểm quyền trước khi gọi ra provider
+        order.requireOwner(userId);
+        Payment payment = payments.findFirstByOrderIdOrderByCreatedAtDesc(orderId).orElse(null);
+        PaymentGatewayPort gateway = payment == null ? gateways.defaultGateway() : gateways.forProvider(payment.getProvider());
         try (LogContext.Scope ignored = LogContext.order(gateway.provider().name(), order.getOrderCode())) {
             if (order.isPending() && reconcile(orderId)) {
                 log.warn("Order {} bấm hủy nhưng provider báo đã thanh toán: giữ đơn, đã cấp vé", order.getOrderCode());
@@ -186,6 +211,8 @@ public class PaymentServiceImpl implements PaymentService {
     }
 
     private boolean pollAndApply(Order order, Payment payment) {
+        LogContext.trade(payment.getGatewayMerchantNo(), payment.getGatewayTerminalId(), payment.getProviderPaymentId());
+        PaymentGatewayPort gateway = gateways.forProvider(payment.getProvider());
         long t0 = System.currentTimeMillis();
         PaymentStatusResult status;
         try {
@@ -196,10 +223,16 @@ public class PaymentServiceImpl implements PaymentService {
             return false;
         }
         audit.record(order.getId(), "OUTBOUND", "getPaymentStatus", Map.of("providerPaymentId", payment.getProviderPaymentId()), status, 200, System.currentTimeMillis() - t0);
-        if (status.status() != PaymentStatusResult.Status.PAID) return false;
+        boolean underpaid = (status.status() == PaymentStatusResult.Status.UNDERPAID
+                && status.amountPaid() > 0 && status.amountPaid() < order.getTotalAmount())
+                || (status.status() == PaymentStatusResult.Status.PENDING
+                && status.amountPaid() > 0 && status.amountPaid() < order.getTotalAmount());
+        if (status.status() != PaymentStatusResult.Status.PAID && !underpaid) return false;
 
-        PaymentEvent event = new PaymentEvent(payment.getProviderPaymentId() + ":poll:" + status.transactionRef(),
-                payment.getProviderPaymentId(), order.getOrderCode(), true, status.amountPaid(), status.transactionRef(),
+        String transactionRef = status.transactionRef() == null || status.transactionRef().isBlank()
+                ? "poll-" + status.status() + "-" + status.amountPaid() : status.transactionRef();
+        PaymentEvent event = new PaymentEvent(payment.getProviderPaymentId() + ":poll:" + transactionRef,
+                payment.getProviderPaymentId(), order.getOrderCode(), true, status.amountPaid(), transactionRef,
                 status.paidAt(), null, null, json.writeValueAsString(status));
         record(payment.getProvider(), "poll", event);
         return orders.findById(order.getId()).map(o -> o.getStatus() == OrderStatus.PAID).orElse(false);

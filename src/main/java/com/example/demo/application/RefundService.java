@@ -23,6 +23,7 @@ import com.example.demo.domain.payment.RefundStatusResult;
 import com.example.demo.domain.payment.RefundSubmitResult;
 import com.example.demo.domain.payment.WebhookEvent;
 import com.example.demo.domain.payment.WebhookProcessingResult;
+import com.example.demo.application.PaymentGatewayRegistry;
 import com.example.demo.domain.refund.Refund;
 import com.example.demo.domain.refund.RefundInitiator;
 import com.example.demo.domain.refund.RefundItem;
@@ -54,15 +55,10 @@ import java.util.UUID;
 import static com.example.demo.domain.payment.WebhookProcessingResult.DUPLICATE;
 import static com.example.demo.domain.payment.WebhookProcessingResult.IGNORED;
 
-/**
- * Mọi nguồn tạo refund qua {@link #create}, mọi lần gửi provider qua {@link #submit}, mọi kết quả qua {@link RefundResultHandler}.
- * Dùng TransactionTemplate như CheckoutService vì các bước gọi nhau trong cùng bean và CÓ GỌI PROVIDER Ở GIỮA.
- */
 @Service
 public class RefundService {
 
     private static final Logger log = LoggerFactory.getLogger(RefundService.class);
-    /** Sau bao lâu thì coi một lệnh REQUESTED là "kẹt" và đi tra provider. */
     private static final Duration STUCK_AFTER = Duration.ofMinutes(1);
 
     private final OrderRepository orders;
@@ -72,7 +68,7 @@ public class RefundService {
     private final RefundRepository refunds;
     private final WebhookEventRepository webhookEvents;
     private final IdempotencyService idempotency;
-    private final PaymentGatewayPort gateway;
+    private final PaymentGatewayRegistry gateways;
     private final GatewayAudit audit;
     private final RefundResultHandler results;
     private final WalletService wallet;
@@ -88,7 +84,7 @@ public class RefundService {
 
     public RefundService(OrderRepository orders, TicketRepository tickets, PaymentRepository payments,
                          EventRepository events, RefundRepository refunds, WebhookEventRepository webhookEvents,
-                         IdempotencyService idempotency, PaymentGatewayPort gateway, GatewayAudit audit,
+                         IdempotencyService idempotency, PaymentGatewayRegistry gateways, GatewayAudit audit,
                          RefundResultHandler results, WalletService wallet, OrganizerAccess access,
                          RefundNotifier notifier, TransactionTemplate tx,
                          @Value("${app.refund.fee-percent:0}") int feePercent,
@@ -104,7 +100,7 @@ public class RefundService {
         this.refunds = refunds;
         this.webhookEvents = webhookEvents;
         this.idempotency = idempotency;
-        this.gateway = gateway;
+        this.gateways = gateways;
         this.audit = audit;
         this.results = results;
         this.wallet = wallet;
@@ -119,33 +115,39 @@ public class RefundService {
         this.merchantAccount = merchantAccount;
     }
 
-    /**
-     * POST /orders/{orderId}/refunds. Cùng Idempotency-Key + cùng body -> trả lại đúng refund cũ, không gọi provider lần hai.
-     * {@code actorId} = user đang gọi; phải là chủ đơn, nếu không 404.
-     */
     public RefundResponse create(UUID actorId, UUID orderId, String idempotencyKey, CreateRefundRequest req,
                                  RefundInitiator initiator) {
         return idempotency.execute(IdempotencyScope.REFUND, idempotencyKey,
                 Map.of("orderId", orderId, "actorId", actorId, "body", req), RefundResponse.class, () -> {
-                    try (LogContext.Scope ignored = LogContext.of(gateway.provider().name())) {
-                        UUID refundId = tx.execute(s -> open(actorId, orderId, req, initiator));   // TX1
-                        LogContext.refundId(refundId);
-                        submit(refundId);                                              // gọi provider NGOÀI transaction
-                        return get(refundId);
+                    try (LogContext.Scope ignored = LogContext.of("refund")) {
+                        UUID refundId = tx.execute(s -> open(actorId, orderId, req, initiator));
+                        try (LogContext.Scope refundLog = logScope(refunds.findById(refundId).orElseThrow())) {
+                            submit(refundId);
+                            mailIfWaitingForDestinationReview(refundId);
+                            return get(refundId);
+                        }
                     }
                 });
     }
 
 
+    private void mailIfWaitingForDestinationReview(UUID refundId) {
+        boolean waiting = refunds.findById(refundId)
+                .map(x -> x.getStatus() == RefundStatus.MANUAL_REVIEW && "DESTINATION_REVIEW".equals(x.getFailureCode()))
+                .orElse(false);
+        if (waiting) sendMailQuietly("NEEDS_REVIEW", refundId, () -> notifier.needsReview(refundId));
+    }
+
     private UUID open(UUID actorId, UUID orderId, CreateRefundRequest req, RefundInitiator initiator) {
         Order order = orders.findWithLockById(orderId)
                 .orElseThrow(() -> DomainException.notFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng"));
-        order.requireOwner(actorId);   // kiểm ngay sau khi khóa: hoàn tiền là tiền RA, không dựa vào orderId khó đoán
+        order.requireOwner(actorId);
         LogContext.orderCode(order.getOrderCode());
         Event event = events.findById(order.getEventId())
                 .orElseThrow(() -> DomainException.notFound("EVENT_NOT_FOUND", "Không tìm thấy sự kiện của đơn"));
         Payment payment = payments.findFirstByOrderIdOrderByCreatedAtDesc(orderId).filter(Payment::isPaid)
                 .orElseThrow(() -> DomainException.conflict("PAYMENT_NOT_FOUND", "Đơn chưa có giao dịch thanh toán thành công"));
+        LogContext.trade(payment.getGatewayMerchantNo(), payment.getGatewayTerminalId(), null);
 
         List<UUID> ids = req.ticketIds().stream().distinct().toList();
         List<Ticket> selected = tickets.findAllByOrderIdAndIdIn(orderId, ids);
@@ -157,22 +159,21 @@ public class RefundService {
         String bin = req.destination() == null ? payment.getPayerBankBin() : req.destination().bin();
         String account = req.destination() == null ? payment.getPayerAccountNumber() : req.destination().accountNumber();
 
-        // "Về đúng tài khoản người trả" xét theo SỐ TÀI KHOẢN, không theo việc client có gửi destination hay không.
-        // PayOS hay trả counterAccountBankId là mã CITAD 8 số (vd 01201001) mà API chi hộ từ chối, nên số tài khoản
-        // thì biết còn mã ngân hàng thì không. Khách chọn đúng ngân hàng của CHÍNH số tài khoản đó vẫn là tiền về
-        // chỗ cũ -> chạy tự động. Nhập số tài khoản khác mới là tiền đi chỗ mới -> người bán duyệt.
         boolean toPayer = account != null && !account.isBlank() && account.equals(payment.getPayerAccountNumber());
 
-        if (req.destination() == null && !BankBins.isBin(bin)) {
+        if (payment.isWallet()) {
+            bin = null;
+            account = null;
+            toPayer = true;
+        } else if (req.destination() == null && !BankBins.isBin(bin)) {
             throw DomainException.conflict("PAYER_ACCOUNT_UNKNOWN",
                     "Chưa xác định được ngân hàng của tài khoản đã thanh toán; chọn ngân hàng rồi gửi kèm destination (bin + accountNumber)");
         }
-        if (req.destination() != null && !BankBins.isBin(bin)) {
+        if (!payment.isWallet() && req.destination() != null && !BankBins.isBin(bin)) {
             throw DomainException.badRequest("INVALID_BANK_BIN",
                     "bin phải là mã BIN Napas 6 số; lấy danh sách ở GET /api/v1/config");
         }
         if (isMerchantAccount(bin, account)) {
-            // Tiền chạy vòng về chính tài khoản thu: chặn ngay, đừng để thành lệnh chi
             throw DomainException.badRequest("DESTINATION_IS_MERCHANT", "Tài khoản nhận không được là tài khoản thu của hệ thống");
         }
 
@@ -180,19 +181,25 @@ public class RefundService {
         order.startRefund();
         long total = amounts.values().stream().mapToLong(Long::longValue).sum();
         List<RefundItem> items = selected.stream().map(t -> new RefundItem(t.getId(), amounts.get(t.getId()))).toList();
-        // Chuẩn hóa email TRƯỚC khi lưu (trim + chữ thường), dùng lại đúng hàm mà đăng ký/đăng nhập đang dùng
-        // để cả app hiểu email theo một kiểu. TẠI SAO cần: "  Foo@BAR.com " và "foo@bar.com" là CÙNG một hộp thư
-        // (phần domain của email không phân biệt hoa thường), nhưng với Java thì hai chuỗi đó khác nhau —
-        // để nguyên thì sau này so khớp email sẽ sai, và khoảng trắng đầu/cuối làm SMTP từ chối địa chỉ.
-        // Null-safe vì AuthService.normalizeEmail gọi trim() ngay: @NotBlank ở CreateRefundRequest đã chặn null
-        // với request qua API, nhưng không dựa vào đó để khỏi vỡ nếu sau này có nơi khác gọi open().
         String contactEmail = req.contactEmail() == null ? null : AuthService.normalizeEmail(req.contactEmail());
         Refund refund = Refund.request(orderId, payment, items, total, initiator, req.reason(), contactEmail,
                 bin, account, toPayer);
-        if (!toPayer) refund.holdForDestinationReview();   // tài khoản lạ: chờ người bán duyệt, không tự chi
+        if (!toPayer) refund.holdForDestinationReview();
         UUID id = refunds.save(refund).getId();
         log.info("Refund {} tạo cho order {}: {} vé, {} VND, {}", id, order.getOrderCode(), items.size(), total, refund.getStatus());
         return id;
+    }
+
+    private LogContext.Scope logScope(Refund r) {
+        LogContext.Scope scope = LogContext.refund(r.getProvider().name(), r.getId(), r.getProviderRefundId());
+        tagLog(r);
+        return scope;
+    }
+
+    private void tagLog(Refund r) {
+        payments.findById(r.getPaymentId())
+                .ifPresent(p -> LogContext.trade(p.getGatewayMerchantNo(), p.getGatewayTerminalId(), null));
+        orders.findById(r.getOrderId()).ifPresent(o -> LogContext.orderCode(o.getOrderCode()));
     }
 
     private boolean isMerchantAccount(String bin, String account) {
@@ -200,13 +207,15 @@ public class RefundService {
         return merchantBin.trim().equals(bin) && merchantAccount.trim().equals(account);
     }
 
-    /**
-     * Gửi lệnh chi cho refund REQUESTED/AWAITING_FUNDS. Job cũng gọi. Gọi lặp an toàn:
-     * TX_a chốt key -> gọi provider NGOÀI TX -> TX_b ghi kết quả. Chết giữa chừng thì {@link #recoverStuck()} tra lại theo key.
-     */
     public void submit(UUID refundId) {
         Refund r = refunds.findById(refundId).orElseThrow();
         if (r.getStatus() != RefundStatus.REQUESTED && r.getStatus() != RefundStatus.AWAITING_FUNDS) return;
+        if (r.getProvider() == PaymentProvider.WALLET) {
+            results.apply(refundId, new RefundStatusResult(RefundStatusResult.Status.SUCCEEDED,
+                    "wallet-refund-" + refundId, null, null, Instant.now()), false);
+            return;
+        }
+        PaymentGatewayPort gateway = gateways.forProvider(r.getProvider());
         if (!payoutEnabled) {
             toManualTransfer(refundId, "PAYOUT_DISABLED", "app.refund.payout-enabled=false, chuyển tay");
             return;
@@ -214,18 +223,12 @@ public class RefundService {
 
         long available;
         try {
-            available = wallet.available();                                  // gọi provider, ngoài TX
+            available = wallet.availableFor(r);
         } catch (RuntimeException ex) {
-            // Kênh chi chưa cấu hình hoặc PayOS không trả lời. Không được ném ra: TX1 đã giữ vé REFUND_PENDING
-            // và đơn REFUND_PROCESSING, ném ra là khách nhận 500 còn đơn kẹt không ai gỡ.
             toManualTransfer(refundId, "PAYOUT_UNAVAILABLE", ex.toString());
             return;
         }
         if (r.getAmount() > available) {
-            // tx.execute (không phải executeWithoutResult) để biết trạng thái CÓ THẬT SỰ vừa đổi hay không.
-            // awaitFunds() vẫn được gọi y như trước — boolean chỉ dùng để quyết định có gửi mail.
-            // "Tin mới với BTC" = trước đó đang REQUESTED. awaitFunds() cũng nhận AWAITING_FUNDS -> AWAITING_FUNDS
-            // (job thử lại) và lần đó KHÔNG phải tin mới, gửi mail nữa là spam.
             boolean justQueued = Boolean.TRUE.equals(tx.execute(s -> refunds.findWithLockById(refundId)
                     .map(x -> {
                         boolean firstTime = x.getStatus() == RefundStatus.REQUESTED;
@@ -234,16 +237,15 @@ public class RefundService {
                     })
                     .orElse(false)));
             log.warn("Refund {} cần {} > ví còn {}: AWAITING_FUNDS", refundId, r.getAmount(), available);
-            // Gửi mail SAU khi TX trên đã commit: chỉ BTC nạp được ví, không báo thì lệnh nằm im tới khi hết 24h.
             if (justQueued) sendMailQuietly("AWAITING_FUNDS", refundId, () -> notifier.awaitingFunds(refundId, available));
             return;
         }
 
         String key;
         try {
-            key = tx.execute(s -> refunds.findWithLockById(refundId).orElseThrow().beginAttempt());   // TX_a
+            key = tx.execute(s -> refunds.findWithLockById(refundId).orElseThrow().beginAttempt());
         } catch (IllegalStateException raced) {
-            return;                                                          // thread khác vừa đổi trạng thái
+            return;
         }
         long orderCode = orders.findById(r.getOrderId()).map(Order::getOrderCode).orElse(0L);
         RefundCommand cmd = new RefundCommand(key, r.getAmount(), "Hoan ve " + orderCode,
@@ -252,15 +254,13 @@ public class RefundService {
         long t0 = System.currentTimeMillis();
         RefundSubmitResult res;
         try {
-            res = gateway.submitRefund(cmd);                                 // NGOÀI transaction
+            res = gateway.submitRefund(cmd);
         } catch (GatewayRejectedException ex) {
             audit.record(r.getOrderId(), "OUTBOUND", "submitRefund", cmd.masked(),
                     Map.of("error", ex.getCode(), "message", String.valueOf(ex.getMessage())), 400, System.currentTimeMillis() - t0);
             onRejected(refundId, ex);
             return;
         } catch (RuntimeException ex) {
-            // Timeout/5xx/mất mạng: KHÔNG biết provider đã nhận chưa. Tra ngay theo key thay vì chờ job cả phút,
-            // vì SDK tự retry với cùng idempotency key nên lỗi này có thể đến SAU khi provider đã nhận lệnh.
             audit.record(r.getOrderId(), "OUTBOUND", "submitRefund", cmd.masked(),
                     Map.of("error", String.valueOf(ex.getMessage())), null, System.currentTimeMillis() - t0);
             log.warn("Refund {} gửi provider không rõ kết quả ({}), tra lại theo key {}", refundId, ex.toString(), key);
@@ -270,8 +270,9 @@ public class RefundService {
             return;
         }
         audit.record(r.getOrderId(), "OUTBOUND", "submitRefund", cmd.masked(), res, 200, System.currentTimeMillis() - t0);
+        LogContext.trade(null, null, res.providerRefundId());
 
-        tx.executeWithoutResult(s -> refunds.findWithLockById(refundId)                              // TX_b
+        tx.executeWithoutResult(s -> refunds.findWithLockById(refundId)
                 .filter(x -> x.getStatus() == RefundStatus.REQUESTED)
                 .ifPresent(x -> x.submitted(res.providerRefundId())));
         if (res.status().isFinal() || res.status() == RefundStatusResult.Status.ON_HOLD) {
@@ -279,7 +280,6 @@ public class RefundService {
         }
     }
 
-    /** Refund của BTC đang đăng nhập. Tiền nằm ở tài khoản BTC nên chính họ duyệt refund tài khoản lạ. */
     @Transactional(readOnly = true)
     public List<RefundResponse> byOrganizer(UUID actorId, RefundStatus status) {
         UUID organizerId = access.currentOrganizer(actorId).getId();
@@ -288,7 +288,6 @@ public class RefundService {
         return refunds.findAllByOrganizer(organizerId, statuses).stream().map(RefundResponse::from).toList();
     }
 
-    /** Như {@link #resolve} nhưng chặn BTC chốt refund của sự kiện người khác (404, không lộ id có tồn tại). */
     public RefundResponse resolveOwned(UUID actorId, UUID refundId, ResolveRefundRequest req) {
         UUID organizerId = access.currentOrganizer(actorId).getId();
         if (refunds.countByOrganizerAndId(organizerId, refundId) == 0) {
@@ -297,7 +296,6 @@ public class RefundService {
         return resolve(refundId, req);
     }
 
-    /** Như {@link #instruction} nhưng giới hạn trong sự kiện của BTC đang đăng nhập. */
     @Transactional(readOnly = true)
     public RefundInstruction instructionOwned(UUID actorId, UUID refundId) {
         UUID organizerId = access.currentOrganizer(actorId).getId();
@@ -307,10 +305,6 @@ public class RefundService {
         return instruction(refundId);
     }
 
-    /**
-     * Hướng dẫn chuyển khoản tay cho refund không chi tự động được. Gọi qua {@link #instructionOwned} (BTC).
-     * Không có đích hợp lệ (ví điện tử không trả counterAccount) thì 409, đừng dựng QR sai đưa BTC quét.
-     */
     @Transactional(readOnly = true)
     public RefundInstruction instruction(UUID refundId) {
         Refund r = refunds.findById(refundId)
@@ -330,8 +324,6 @@ public class RefundService {
     }
 
     private void toManualTransfer(UUID refundId, String code, String reason) {
-        // .filter(...) đã có sẵn nên chỉ cần đổi ifPresent -> map để biết có đổi trạng thái thật hay không:
-        // lần gọi thứ hai (job chạy lại) sẽ rơi khỏi filter, trả false, và BTC không nhận mail trùng.
         boolean movedToReview = Boolean.TRUE.equals(tx.execute(s -> refunds.findWithLockById(refundId)
                 .filter(x -> x.getStatus() == RefundStatus.REQUESTED || x.getStatus() == RefundStatus.AWAITING_FUNDS)
                 .map(x -> {
@@ -344,17 +336,6 @@ public class RefundService {
         if (movedToReview) sendMailQuietly("NEEDS_REVIEW", refundId, () -> notifier.needsReview(refundId));
     }
 
-    /**
-     * Gọi notifier mà KHÔNG BAO GIỜ để nó làm sập luồng hoàn tiền. Dùng cho MỌI loại mail ở file này —
-     * mail cho ban tổ chức (ví thiếu tiền, cần xử lý tay) và mail cho khách (BTC hủy yêu cầu hoàn vé).
-     *
-     * <p>TẠI SAO: khách đang chờ response, TX1 đã giữ vé ở REFUND_PENDING và đơn ở REFUND_PROCESSING.
-     * Để exception của việc gửi mail bay ra là khách nhận 500 còn đơn kẹt không ai gỡ — đúng tinh thần
-     * catch quanh {@code wallet.available()} ở {@link #submit}. Mail chỉ là thông báo, mất thì mất, tiền quan trọng hơn.
-     *
-     * <p>Mọi lời gọi đều phải đặt SAU khi transaction đã commit: SMTP là I/O mạng, giữ transaction mở
-     * trong lúc chờ nó là giữ luôn khóa row.
-     */
     private void sendMailQuietly(String kind, UUID refundId, Runnable send) {
         try {
             send.run();
@@ -363,11 +344,9 @@ public class RefundService {
         }
     }
 
-    /**
-     * Tra provider theo key: thấy lệnh thì nhận lấy nó (không tạo lệnh thứ hai), rồi chốt luôn nếu đã xong.
-     * @return true nếu provider đã có lệnh dưới key này.
-     */
     private boolean adoptByReference(UUID refundId, String key) {
+        Refund refund = refunds.findById(refundId).orElseThrow();
+        PaymentGatewayPort gateway = gateways.forProvider(refund.getProvider());
         Optional<RefundStatusResult> found;
         try {
             found = gateway.findRefundByReference(key);
@@ -385,15 +364,9 @@ public class RefundService {
         return true;
     }
 
-    /** 4xx: tiền CHƯA đi. Phân loại theo code chuẩn hóa của adapter. */
     private void onRejected(UUID refundId, GatewayRejectedException ex) {
         switch (ex.getCode()) {
             case "INSUFFICIENT_PAYOUT_BALANCE", "NO_PAYOUT_CREDIT" -> {
-                // Provider nói thiếu tiền dù pre-check ở submit() thấy đủ (số dư đọc trước đó đã cũ, hoặc
-                // lệnh chi khác vừa tiêu mất). Vẫn phải báo BTC, nếu không lệnh nằm im tới khi hết 24h.
-                // CHỐNG SPAM: chỉ báo khi lệnh CHƯA từng bị đánh dấu thiếu tiền. Nếu ví cứ báo đủ mà provider
-                // cứ từ chối thì RefundQueueJob gọi lại mỗi 60 giây — không có chốt này BTC nhận cả nghìn mail
-                // một đêm. failureCode nằm sẵn trong DB và retry() của admin sẽ xóa nó, nên không cần thêm column.
                 boolean firstTime = Boolean.TRUE.equals(tx.execute(s -> refunds.findWithLockById(refundId)
                         .map(x -> {
                             boolean fresh = !isInsufficientFunds(x.getFailureCode());
@@ -401,18 +374,23 @@ public class RefundService {
                             return fresh;
                         })
                         .orElse(false)));
-                // -1: không đọc lại ví chỉ để lấy số dư cho log, provider vừa từ chối là đủ biết ví thiếu.
                 if (firstTime) sendMailQuietly("AWAITING_FUNDS", refundId, () -> notifier.awaitingFunds(refundId, -1));
             }
             case "INVALID_DESTINATION" -> results.apply(refundId,
                     new RefundStatusResult(RefundStatusResult.Status.FAILED, null, ex.getCode(), ex.getMessage(), Instant.now()), false);
-            // LIMIT_EXCEEDED, PAYOUT_NOT_CONFIGURED, mã lạ: để người xem, đừng tự đoán
-            default -> tx.executeWithoutResult(
-                    s -> refunds.findWithLockById(refundId).ifPresent(x -> x.manualReview(ex.getCode(), ex.getMessage())));
+            default -> {
+                boolean movedToReview = Boolean.TRUE.equals(tx.execute(s -> refunds.findWithLockById(refundId)
+                        .map(x -> {
+                            boolean was = x.getStatus() == RefundStatus.MANUAL_REVIEW;
+                            x.manualReview(ex.getCode(), ex.getMessage());
+                            return !was;
+                        })
+                        .orElse(false)));
+                if (movedToReview) sendMailQuietly("NEEDS_REVIEW", refundId, () -> notifier.needsReview(refundId));
+            }
         }
     }
 
-    /** Hai mã "ví hết tiền" mà adapter chuẩn hóa ra; dùng để nhận biết lệnh ĐÃ được báo thiếu tiền trước đó. */
     private static boolean isInsufficientFunds(String failureCode) {
         return "INSUFFICIENT_PAYOUT_BALANCE".equals(failureCode) || "NO_PAYOUT_CREDIT".equals(failureCode);
     }
@@ -423,7 +401,6 @@ public class RefundService {
                 .orElseThrow(() -> DomainException.notFound("REFUND_NOT_FOUND", "Không tìm thấy yêu cầu hoàn tiền")));
     }
 
-    /** Cho endpoint của người mua: không phải chủ đơn -> 404. */
     @Transactional(readOnly = true)
     public RefundResponse getOwned(UUID actorId, UUID refundId) {
         Refund refund = refunds.findById(refundId)
@@ -434,7 +411,6 @@ public class RefundService {
         return RefundResponse.from(refund);
     }
 
-    /** Cho endpoint của người mua: không phải chủ đơn -> 404. */
     @Transactional(readOnly = true)
     public List<RefundResponse> byOrderOwned(UUID actorId, UUID orderId) {
         orders.findById(orderId)
@@ -443,26 +419,20 @@ public class RefundService {
         return byOrder(orderId);
     }
 
-    /** Không kiểm chủ đơn: dùng nội bộ (admin, job, giả lập provider trong test). */
     @Transactional(readOnly = true)
     public List<RefundResponse> byOrder(UUID orderId) {
         return refunds.findAllByOrderIdOrderByCreatedAt(orderId).stream().map(RefundResponse::from).toList();
     }
 
-    /**
-     * POST /webhooks/{provider}/refund. Sai chữ ký -> 401 (vẫn ghi sổ). Trùng -> DUPLICATE nhờ unique (provider, event_id).
-     * PayOS không có webhook lệnh chi nên đường này chỉ test double dùng; với PayOS thì RefundPollJob là đường chính.
-     */
     public WebhookProcessingResult handleRefundWebhook(PaymentProvider provider, String rawBody, Map<String, String> headers) {
-        if (gateway.provider() != provider) {
-            throw DomainException.notFound("PROVIDER_INACTIVE", "Provider " + provider + " không hoạt động ở profile này");
-        }
+        PaymentGatewayPort gateway = gateways.forProvider(provider);
         try (LogContext.Scope ignored = LogContext.of(provider.name())) {
             return applyRefundWebhook(provider, rawBody, headers);
         }
     }
 
     private WebhookProcessingResult applyRefundWebhook(PaymentProvider provider, String rawBody, Map<String, String> headers) {
+        PaymentGatewayPort gateway = gateways.forProvider(provider);
         RefundEvent e;
         try {
             e = gateway.verifyAndParseRefund(rawBody, headers);
@@ -475,8 +445,11 @@ public class RefundService {
             saved = tx.execute(s -> webhookEvents.saveAndFlush(
                     WebhookEvent.received(provider, e.eventId(), "refund", e.rawPayload())));
         } catch (DataIntegrityViolationException duplicate) {
-            log.info("Webhook refund trùng {} {}: bỏ qua", provider, e.eventId());
-            return DUPLICATE;
+            if (webhookEvents.findByProviderAndEventId(provider, e.eventId()).isPresent()) {
+                log.info("Webhook refund trùng {} {}: bỏ qua", provider, e.eventId());
+                return DUPLICATE;
+            }
+            throw duplicate;
         }
         Refund refund = refunds.findByProviderAndProviderRefundId(provider, e.providerRefundId())
                 .or(() -> refunds.findByIdempotencyKey(e.referenceId())).orElse(null);
@@ -486,6 +459,7 @@ public class RefundService {
             result = IGNORED;
         } else {
             LogContext.refundId(refund.getId());
+            tagLog(refund);
             result = results.apply(refund.getId(),
                     new RefundStatusResult(e.status(), e.providerRefundId(), e.failureCode(), e.failureReason(), Instant.now()), false);
             audit.record(refund.getOrderId(), "INBOUND", "webhook:refund", null, e.rawPayload(), 200, 0);
@@ -496,20 +470,17 @@ public class RefundService {
         return result;
     }
 
-    /**
-     * RefundPollJob: hỏi provider các refund PROCESSING. Quá {@code processingTimeout} mà vẫn đang xử lý thì
-     * MANUAL_REVIEW chứ KHÔNG phải FAILED — FAILED mời admin bấm RETRY trong khi lệnh cũ còn có thể thành công, tức chi hai lần.
-     */
     public void pollProcessing() {
         for (Refund r : refunds.findAllByStatusOrderByCreatedAt(RefundStatus.PROCESSING)) {
-            if (r.getProvider() != gateway.provider() || r.getProviderRefundId() == null) continue;
-            try (LogContext.Scope ignored = LogContext.refund(r.getProvider().name(), r.getId())) {
+            if (r.getProviderRefundId() == null) continue;
+            try (LogContext.Scope ignored = logScope(r)) {
                 poll(r);
             }
         }
     }
 
     private void poll(Refund r) {
+        PaymentGatewayPort gateway = gateways.forProvider(r.getProvider());
         long t0 = System.currentTimeMillis();
         RefundStatusResult status;
         try {
@@ -524,28 +495,27 @@ public class RefundService {
                 status, 200, System.currentTimeMillis() - t0);
         if (status.inFlight()) {
             boolean tooLong = r.getSubmittedAt() != null && r.getSubmittedAt().plus(processingTimeout).isBefore(Instant.now());
-            tx.executeWithoutResult(s -> refunds.findWithLockById(r.getId()).ifPresent(x -> {
+            boolean timedOut = Boolean.TRUE.equals(tx.execute(s -> refunds.findWithLockById(r.getId()).map(x -> {
                 x.polled();
                 if (tooLong && x.getStatus() == RefundStatus.PROCESSING) {
                     x.manualReview("PROCESSING_TIMEOUT", "Provider chưa chốt sau " + processingTimeout
                             + "; lệnh có thể vẫn đang bay, KHÔNG gửi lại, tra dashboard trước");
+                    return true;
                 }
-            }));
+                return false;
+            }).orElse(false)));
+            if (timedOut) sendMailQuietly("NEEDS_REVIEW", r.getId(), () -> notifier.needsReview(r.getId()));
             return;
         }
         results.apply(r.getId(), status, false);
     }
 
-    /** RefundQueueJob: ví đủ thì gửi AWAITING_FUNDS theo thứ tự vào hàng; dừng ở refund đầu tiên không đủ (FIFO, không chen). */
     public void drainQueue() {
         List<Refund> queue = refunds.findAllByStatusOrderByQueuedSince(RefundStatus.AWAITING_FUNDS);
         if (queue.isEmpty()) return;
-        long available = wallet.available();
         for (Refund r : queue) {
+            long available = wallet.available(r.getProvider());
             if (r.getQueuedSince() != null && r.getQueuedSince().plus(awaitingFundsTimeout).isBefore(Instant.now())) {
-                // Chỉ mail khi lệnh THẬT SỰ vừa rời hàng chờ (trước đó đang AWAITING_FUNDS). manualReview() vẫn
-                // được gọi y như cũ; boolean chỉ để chặn mail nếu thread khác vừa đổi trạng thái trước ta.
-                // Vòng job sau nó đã là MANUAL_REVIEW nên không còn trong queue -> không có mail lần hai.
                 boolean movedToReview = Boolean.TRUE.equals(tx.execute(s -> refunds.findWithLockById(r.getId())
                         .map(x -> {
                             boolean wasQueued = x.getStatus() == RefundStatus.AWAITING_FUNDS;
@@ -557,44 +527,32 @@ public class RefundService {
                 continue;
             }
             if (r.getAmount() > available) break;
-            try (LogContext.Scope ignored = LogContext.refund(r.getProvider().name(), r.getId())) {
+            try (LogContext.Scope ignored = logScope(r)) {
                 submit(r.getId());
             }
             available -= r.getAmount();
         }
     }
 
-    /**
-     * RefundRecoveryJob: REQUESTED kẹt. Có key và quá 1 phút không kết quả thì tra provider theo key
-     * (có → PROCESSING, không → gửi lại CÙNG key); chưa từng gửi thì gửi lần đầu.
-     */
     public void recoverStuck() {
         Instant cutoff = Instant.now().minus(STUCK_AFTER);
         for (Refund r : refunds.findAllByStatusAndSubmittedAtBefore(RefundStatus.REQUESTED, cutoff)) {
-            if (r.getProvider() != gateway.provider() || r.getIdempotencyKey() == null) continue;
-            try (LogContext.Scope ignored = LogContext.refund(r.getProvider().name(), r.getId())) {
+            if (r.getIdempotencyKey() == null) continue;
+            try (LogContext.Scope ignored = logScope(r)) {
                 if (!adoptByReference(r.getId(), r.getIdempotencyKey())) {
                     log.info("Refund {} không có ở provider, gửi lại cùng key {}", r.getId(), r.getIdempotencyKey());
-                    submit(r.getId());                                       // beginAttempt() giữ nguyên key
+                    submit(r.getId());
                 }
             }
         }
         refunds.findAllByStatusAndSubmittedAtIsNullAndCreatedAtBefore(RefundStatus.REQUESTED, cutoff)
                 .forEach(r -> {
-                    try (LogContext.Scope ignored = LogContext.refund(r.getProvider().name(), r.getId())) {
+                    try (LogContext.Scope ignored = logScope(r)) {
                         submit(r.getId());
                     }
                 });
     }
 
-    /**
-     * Chốt refund đang chờ người quyết. SUCCEEDED/FAILED đi qua cùng RefundResultHandler như provider;
-     * RETRY về REQUESTED rồi gửi lại; CANCELLED hủy yêu cầu hoàn tiền (đi đường FAILED, xem {@link #applyResolve}).
-     *
-     * <p>Điều kiện trạng thái khác nhau theo outcome: ba outcome cũ chỉ nhận MANUAL_REVIEW (giữ nguyên hành vi cũ),
-     * còn CANCELLED nhận cả AWAITING_FUNDS — lệnh đang xếp hàng chờ nạp ví thì hủy được, và đó chính là ca
-     * BTC hay cần hủy nhất (ví không đủ tiền, khách đồng ý thôi không hoàn nữa).
-     */
     public RefundResponse resolve(UUID refundId, ResolveRefundRequest req) {
         Refund r = refunds.findById(refundId)
                 .orElseThrow(() -> DomainException.notFound("REFUND_NOT_FOUND", "Không tìm thấy yêu cầu hoàn tiền"));
@@ -604,28 +562,12 @@ public class RefundService {
             throw DomainException.conflict("REFUND_NOT_IN_REVIEW",
                     "Chỉ chốt được refund đang MANUAL_REVIEW (hiện tại: " + r.getStatus() + ")");
         }
-        try (LogContext.Scope ignored = LogContext.refund(r.getProvider().name(), refundId)) {
+        try (LogContext.Scope ignored = logScope(r)) {
             log.info("Admin resolve refund {}: {} ({})", refundId, req.outcome(), req.note());
             return applyResolve(r, refundId, req);
         }
     }
 
-    /**
-     * Ba chốt an toàn cho CANCELLED. TẠI SAO phải kỹ: hủy = vé về ACTIVE, tức KHÁCH GIỮ LẠI VÉ.
-     * Nếu lệnh chi vẫn đi thì khách vừa giữ vé vừa nhận tiền — mất tiền thật và không có đường đòi lại.
-     *
-     * <p>1) Bắt buộc có {@code note}: hủy xong refund nằm ở FAILED/CANCELLED_BY_ORGANIZER, dòng note là
-     * thứ duy nhất còn lại để biết vì sao. Ba outcome cũ KHÔNG bị bắt buộc (không phá FE/test đang chạy).
-     *
-     * <p>2) Chỉ hủy ở MANUAL_REVIEW hoặc AWAITING_FUNDS — hai trạng thái mà lệnh đang NẰM CHỜ người/ví,
-     * chưa gửi provider. REQUESTED thì {@link #submit} có thể đang gọi provider ngay lúc này (gọi xong mới
-     * biết lệnh đã vào chưa); PROCESSING thì provider đã nhận và tiền đang chuyển.
-     *
-     * <p>3) Có {@code providerRefundId} là provider ĐÃ nhận lệnh -> không hủy, y hệt {@link Refund#retry}.
-     * Cái bẫy ở đây: MANUAL_REVIEW có thể đến từ PROCESSING_TIMEOUT (xem {@link #poll}) hoặc ON_HOLD —
-     * trạng thái nằm trong danh sách "hủy được" nhưng lệnh CÓ THỂ vẫn đang bay ở provider. Đường đúng cho ca đó:
-     * tra dashboard PayOS rồi chốt SUCCEEDED hoặc FAILED theo sự thật.
-     */
     private void requireCancellable(Refund r, ResolveRefundRequest req) {
         if (req.note() == null || req.note().isBlank()) {
             throw DomainException.badRequest("REFUND_CANCEL_NOTE_REQUIRED",
@@ -655,24 +597,9 @@ public class RefundService {
                                req.destination() == null ? null : req.destination().accountNumber()));
                 submit(refundId);
             }
-            // Hủy đi CHUNG một cửa với FAILED: RefundResultHandler đã có sẵn "case FAILED, CANCELLED ->"
-            // (vé về ACTIVE + đơn về REFUND_FAILED, hoàn lại được). Nhờ vậy không cần thêm RefundStatus mới,
-            // và tính idempotent có sẵn ở đó vẫn nguyên: refund đã terminal thì IGNORED, kho không lệch.
-            // Kết quả: status=FAILED, failureCode=CANCELLED_BY_ORGANIZER, failureReason=note. Kho KHÔNG cộng
-            // (vé chưa từng nhả ra khỏi kho), ledger không đụng (chưa có đồng nào đi).
-            // providerRefundId truyền null cho rõ ý "không có lệnh nào ở provider" — requireCancellable() đã chặn.
             case CANCELLED -> {
                 WebhookProcessingResult applied = results.apply(refundId, new RefundStatusResult(
                         RefundStatusResult.Status.CANCELLED, null, "CANCELLED_BY_ORGANIZER", req.note(), Instant.now()), true);
-                // Mail cho KHÁCH, gửi SAU khi results.apply() đã commit (nó mang @Transactional và ta gọi qua
-                // bean khác nên transaction đóng lại ngay khi nó return) — không giữ khóa row trong lúc chờ SMTP.
-                // Bọc sendMailQuietly: SMTP chết thì vé vẫn về ACTIVE và BTC vẫn nhận 200, chỉ mất cái mail.
-                //
-                // ĐÚNG MỘT MAIL: hai chốt độc lập. (1) requireCancellable() ở resolve() chạy TRƯỚC nhánh này và
-                // chỉ cho hủy khi refund đang MANUAL_REVIEW/AWAITING_FUNDS — bấm hủy lần hai thì refund đã FAILED
-                // nên 409 REFUND_NOT_CANCELLABLE, chưa vào tới đây. (2) Vẫn kiểm PROCESSED thay vì tin chốt (1):
-                // RefundResultHandler trả IGNORED khi refund đã terminal, tức "lần này KHÔNG đổi gì cả" — nếu có
-                // hai request hủy chạy song song lọt qua (1) thì cái thứ hai nhận IGNORED và không gửi mail trùng.
                 if (applied == WebhookProcessingResult.PROCESSED) {
                     sendMailQuietly("CANCELLED_TO_CUSTOMER", refundId, () -> notifier.cancelledByOrganizer(refundId));
                 }

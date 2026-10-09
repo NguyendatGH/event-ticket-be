@@ -10,7 +10,6 @@ import java.util.List;
 
 public interface EventService {
 
-    /** Bộ lọc GET /events. Chuỗi rỗng coi như không lọc. */
     record Filter(String q, String category, String city, LocalDate from, LocalDate to, String when,
                   Long priceMin, Long priceMax, String organizer, boolean includePast) {}
 

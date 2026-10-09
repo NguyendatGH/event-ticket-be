@@ -28,10 +28,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
 
-/**
- * /api/v1/auth: đăng ký, đăng nhập, refresh/đăng xuất (AuthService), quên/đặt lại mật khẩu (PasswordResetService),
- * user hiện tại (UserService). Hầu hết endpoint là public (SecurityConfig), trừ GET /me.
- */
 @RestController
 @RequestMapping("/api/v1/auth")
 @Tag(name = "Auth", description = "Đăng ký, đăng nhập, refresh token, quên mật khẩu")
@@ -49,7 +45,7 @@ public class AuthController {
 
     @PostMapping("/register")
     @ResponseStatus(HttpStatus.CREATED)
-    @SecurityRequirements   // rỗng = endpoint public, Swagger không đòi token
+    @SecurityRequirements
     @Operation(summary = "Đăng ký", description = "Tạo user role CUSTOMER và trả về phiên đăng nhập (access + refresh token)")
     public AuthResponse register(@Valid @RequestBody RegisterRequest req) {
         return authService.register(req);

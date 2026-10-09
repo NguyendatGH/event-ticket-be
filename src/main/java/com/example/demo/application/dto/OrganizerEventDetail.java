@@ -8,10 +8,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * Chi tiết sự kiện phía BTC: mọi field của EventUpsertRequest + số liệu. Theo tier: sold = vé đã cấp,
- * reserved = totalQuantity − available − sold (đơn đang chờ), revenue = tiền vé của đơn PRIMARY đã PAID.
- */
 public record OrganizerEventDetail(
         UUID id, String slug, String name, String category, String tagline, List<String> description,
         String coverImageUrl, String coverImageAlt, Instant startsAt, Instant endsAt, Venue venue,
@@ -24,7 +20,6 @@ public record OrganizerEventDetail(
 
     public record Stats(long ticketsSold, long ticketsTotal, long revenue, long ordersPaid, long ordersPending) {}
 
-    /** {@code status} là trạng thái hiển thị (đã tính ENDED/SOLD_OUT). */
     public static OrganizerEventDetail from(Event e, String status, List<Tier> tiers, Stats stats) {
         return new OrganizerEventDetail(e.getId(), e.getSlug(), e.getName(), e.getCategory(), e.getTagline(),
                 e.getDescription(), e.getCoverImageUrl(), e.getCoverImageAlt(), e.getStartsAt(), e.getEndsAt(),

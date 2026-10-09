@@ -22,10 +22,6 @@ public class StorageConfig implements WebMvcConfigurer {
         this.localDir = Path.of(localDir).toAbsolutePath().normalize();
     }
 
-    /**
-     * Nơi lưu ảnh, ưu tiên: {@code CLOUDINARY_URL} → ghép từ 3 ô {@code CLOUDINARY_CLOUD_NAME}/{@code _API_KEY}/{@code _API_SECRET}
-     * → thư mục {@code uploads/} phục vụ qua {@code GET /uploads/**}. Chọn một lần lúc tạo bean: đổi .env phải restart.
-     */
     @Bean
     ImageStorage imageStorage(@Value("${app.storage.cloudinary-url:}") String cloudinaryUrl,
                               @Value("${app.storage.cloudinary-cloud-name:}") String cloudName,
@@ -41,10 +37,6 @@ public class StorageConfig implements WebMvcConfigurer {
         return new CloudinaryImageStorage(url);
     }
 
-    /**
-     * Ghép 3 ô rời thành {@code cloudinary://<key>:<secret>@<cloud>}. Thiếu ô nào thì trả rỗng = chưa cấu hình:
-     * thà lưu tạm ở đĩa còn hơn dựng client với cloud rỗng rồi mọi lần upload đều lỗi khó hiểu.
-     */
     static String composeCloudinaryUrl(String cloudName, String apiKey, String apiSecret) {
         if (cloudName.isBlank() || apiKey.isBlank() || apiSecret.isBlank()) return "";
         return "cloudinary://" + apiKey.trim() + ":" + apiSecret.trim() + "@" + cloudName.trim();
@@ -52,6 +44,6 @@ public class StorageConfig implements WebMvcConfigurer {
 
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        registry.addResourceHandler("/uploads/**").addResourceLocations("file:" + localDir + "/");   // phải có "/" cuối, kể cả khi thư mục chưa tồn tại
+        registry.addResourceHandler("/uploads/**").addResourceLocations("file:" + localDir + "/");
     }
 }

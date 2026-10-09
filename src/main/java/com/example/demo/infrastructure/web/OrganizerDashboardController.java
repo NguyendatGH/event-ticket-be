@@ -19,11 +19,6 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.LocalDate;
 import java.util.List;
 
-/**
- * Số liệu bán vé của BTC hiện tại (quyền ORGANIZER/ADMIN do SecurityConfig chặn).
- * Tham số chung: from, to (YYYY-MM-DD, mặc định 30 ngày tới hôm nay, giờ VN), interval (day|week|month), eventId.
- * Nhận dạng String rồi tự parse để lỗi trả 400 VALIDATION kèm errors theo field.
- */
 @RestController
 @RequestMapping("/api/v1/organizer/dashboard")
 @Tag(name = "Organizer dashboard", description = "Số liệu bán vé của organizer hiện tại")
@@ -81,7 +76,6 @@ public class OrganizerDashboardController {
             int n = Integer.parseInt(raw.trim());
             if (n >= 1 && n <= MAX_TOP_EVENTS) return n;
         } catch (NumberFormatException ignored) {
-            // rơi xuống lỗi VALIDATION bên dưới
         }
         throw DomainException.badRequest("VALIDATION", "Tham số dashboard không hợp lệ")
                 .withError("limit", "limit phải từ 1 đến 50");

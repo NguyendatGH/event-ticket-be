@@ -14,10 +14,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * Mỗi phút, order PENDING_PAYMENT quá expires_at → hỏi provider một lần;
- * chưa trả thì EXPIRED + trả kho + hủy link; đã trả thì xử lý như webhook.
- */
 @Component
 public class OrderExpiryJob {
 
@@ -31,21 +27,21 @@ public class OrderExpiryJob {
         this.payments = payments;
     }
 
-    // GIỚI HẠN: không ShedLock, giả định một instance; nhiều instance thì thêm ShedLock hoặc cờ DB
     @Scheduled(fixedDelayString = "PT60S")
     public void run() {
         MDC.put("trace_id", UUID.randomUUID().toString());
         try {
             List<Order> due = orders.findAllByStatusAndExpiresAtBefore(OrderStatus.PENDING_PAYMENT, Instant.now());
-            int expired = 0, paid = 0;
+            int expired = 0, manualReview = 0, paid = 0;
             for (Order o : due) {
                 switch (payments.settleExpired(o.getId())) {
                     case "PAID" -> paid++;
                     case "EXPIRED" -> expired++;
+                    case "MANUAL_REVIEW" -> manualReview++;
                     default -> { }
                 }
             }
-            if (!due.isEmpty()) log.info("OrderExpiryJob: {} đơn quá hạn, hết hạn {}, phát hiện đã trả {}", due.size(), expired, paid);
+            if (!due.isEmpty()) log.info("OrderExpiryJob: {} đơn quá hạn, hết hạn {}, manual review {}, phát hiện đã trả {}", due.size(), expired, manualReview, paid);
         } finally {
             MDC.remove("trace_id");
         }

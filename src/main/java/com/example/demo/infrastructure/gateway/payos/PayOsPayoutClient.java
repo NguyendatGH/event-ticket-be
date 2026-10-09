@@ -27,11 +27,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
 
-/**
- * Kênh CHI của PayOS (payout) cho refund. Tách khỏi {@link PayOsPaymentGateway} vì credential khác
- * ({@code app.payos.payout.*}) và dựng lazy — app vẫn khởi động khi chưa cấu hình, chỉ refund đầu tiên mới báo lỗi.
- * Chi được tiền thật còn cần (ngoài code): bật chi hộ trên dashboard, liên kết ví Bao Kim, whitelist IP server, nạp ví.
- */
 @Component
 @Profile("!test")
 public class PayOsPayoutClient {
@@ -59,7 +54,6 @@ public class PayOsPayoutClient {
         return notBlank(clientId) && notBlank(apiKey) && notBlank(checksumKey);
     }
 
-    /** Lệnh chi mới. Provider idempotent theo {@code command.referenceId()} (truyền làm idempotency key). */
     public RefundSubmitResult submit(RefundCommand command) {
         PayoutRequests body = PayoutRequests.builder()
                 .referenceId(command.referenceId())
@@ -78,10 +72,6 @@ public class PayOsPayoutClient {
         return map(call("get payout", () -> sdk().payouts().get(providerRefundId)));
     }
 
-    /**
-     * Tra lệnh theo referenceId. PayOS có thể khớp lỏng nên lọc lại đúng referenceId — nhận nhầm lệnh của refund
-     * khác là chốt sai kết quả cho cả hai.
-     */
     public Optional<RefundStatusResult> findByReference(String referenceId) {
         GetPayoutListParams params = GetPayoutListParams.builder().referenceId(referenceId).limit(10).build();
         Page<Payout> page = call("list payouts", () -> sdk().payouts().list(params));
@@ -90,7 +80,6 @@ public class PayOsPayoutClient {
         return items.stream().filter(p -> referenceId.equals(p.getReferenceId())).findFirst().map(PayOsPayoutClient::map);
     }
 
-    /** Số dư ví chi. PayOS trả về chuỗi, không phải số. */
     public long balance() {
         PayoutAccountInfo info = call("payout balance", () -> sdk().payoutsAccount().balance());
         String raw = info.getBalance() == null ? "" : info.getBalance().trim();
@@ -129,10 +118,6 @@ public class PayOsPayoutClient {
         return s;
     }
 
-    /**
-     * Chỉ có hai câu trả lời cho tiền: "chắc chắn chưa đi" và "không biết".
-     * PayOS báo lỗi nghiệp vụ bằng HTTP 200 kèm code khác "00", nên 2xx-4xx (trừ 408/429) là từ chối dứt khoát.
-     */
     private static <T> T call(String op, Supplier<T> action) {
         try {
             return action.get();
@@ -152,11 +137,9 @@ public class PayOsPayoutClient {
         }
     }
 
-    /** Đưa mã lỗi PayOS về tập code chuẩn hóa mà RefundService phân loại được. */
     static String normalize(String payosCode, String description) {
         String c = payosCode == null ? "" : payosCode.toUpperCase();
         String m = description == null ? "" : description.toLowerCase();
-        // PayOS trả tiếng Việt: "Số dư không đủ"
         if (c.contains("BALANCE") || c.contains("INSUFFICIENT") || m.contains("insufficient") || m.contains("số dư")) {
             return "INSUFFICIENT_PAYOUT_BALANCE";
         }
@@ -165,10 +148,6 @@ public class PayOsPayoutClient {
         return "REJECTED";
     }
 
-    /**
-     * Trạng thái giao dịch là nguồn chính xác nhất; không có thì suy từ approvalState của cả lệnh.
-     * {@code PayoutTransactionState} trùng tên 1-1 với {@code RefundStatusResult.Status}.
-     */
     static RefundStatusResult map(Payout p) {
         List<PayoutTransaction> txs = p.getTransactions();
         PayoutTransaction tx = txs == null || txs.isEmpty() ? null : txs.get(txs.size() - 1);
@@ -187,7 +166,6 @@ public class PayOsPayoutClient {
             case COMPLETED -> RefundStatusResult.Status.SUCCEEDED;
             case REJECTED, FAILED -> RefundStatusResult.Status.FAILED;
             case CANCELLED -> RefundStatusResult.Status.CANCELLED;
-            // PARTIAL_COMPLETED: một phần đã đi, một phần chưa -> không tự chốt, để người xem
             case PARTIAL_COMPLETED -> RefundStatusResult.Status.ON_HOLD;
             case DRAFTING, SUBMITTED, APPROVED, SCHEDULED, PROCESSING -> RefundStatusResult.Status.PROCESSING;
         };

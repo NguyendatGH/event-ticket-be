@@ -13,10 +13,6 @@ import java.util.UUID;
 import static com.example.demo.domain.ledger.LedgerDirection.CREDIT;
 import static com.example.demo.domain.ledger.LedgerDirection.DEBIT;
 
-/**
- * Ghi sổ bút toán kép. Gọi TRONG transaction của nghiệp vụ để sổ và trạng thái cùng sống cùng chết.
- * Mỗi hàm ghi một bộ vế cân nhau; lệch là ném ngay chứ không để sổ sai nằm im.
- */
 @Service
 public class LedgerService {
 
@@ -26,7 +22,6 @@ public class LedgerService {
         this.ledger = ledger;
     }
 
-    /** Đơn sang PAID: tiền vào tài khoản thu, sinh nợ với khách (trừ phần phí sàn nếu có). */
     public void recordOrderPaid(Order order) {
         long paid = order.getPaidAmount();
         if (paid <= 0) return;
@@ -37,7 +32,6 @@ public class LedgerService {
                 LedgerEntry.of(LedgerAccount.FEES, CREDIT, fee, "ORDER", order.getId())));
     }
 
-    /** Refund SUCCEEDED: tiền rời ví chi, giảm nợ với khách. Chỉ gọi khi provider đã xác nhận tiền đi. */
     public void recordRefundSettled(Refund refund) {
         long amount = refund.getAmount();
         if (amount <= 0) return;
@@ -46,7 +40,6 @@ public class LedgerService {
                 LedgerEntry.of(LedgerAccount.PAYOUT_WALLET, CREDIT, amount, "REFUND", refund.getId())));
     }
 
-    /** Tiền đã thu của đơn theo sổ, phần thuộc về khách (đã trừ phí). Trần để so khi hoàn tiền. */
     public long customerLiabilityOf(UUID orderId) {
         return ledger.sumFor(LedgerAccount.CUSTOMER_LIABILITY, CREDIT, "ORDER", orderId);
     }

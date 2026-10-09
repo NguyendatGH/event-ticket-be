@@ -21,10 +21,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.Instant;
 
-/**
- * Quên / đặt lại mật khẩu. Controller: AuthController (POST /auth/forgot-password, /auth/reset-password).
- * Token đặt lại là opaque, dùng một lần, DB chỉ lưu sha256 (giống refresh token).
- */
 @Service
 public class PasswordResetServiceImpl implements PasswordResetService {
 
@@ -58,10 +54,6 @@ public class PasswordResetServiceImpl implements PasswordResetService {
         this.resetPasswordUrl = resetPasswordUrl;
     }
 
-    /**
-     * Luôn trả cùng một kết quả dù email có tồn tại hay không (không cho dò email nào đã đăng ký).
-     * Email có thật: hủy link cũ chưa dùng, tạo token mới và gửi link qua Mailer.
-     */
     @Override
     @Transactional
     public ForgotPasswordResponse forgotPassword(String email) {
@@ -74,12 +66,10 @@ public class PasswordResetServiceImpl implements PasswordResetService {
             mailer.sendPasswordReset(user.getEmail(), url);
             return url;
         }).orElse(null);
-        // Link chỉ lộ ra response ở profile dev (để test khi chưa có email thật); email lạ thì không có link
         String devResetUrl = env.matchesProfiles("dev") ? resetUrl : null;
         return new ForgotPasswordResponse(true, resetTtl.toMinutes(), devResetUrl);
     }
 
-    /** 400 TOKEN_INVALID (lạ/đã dùng), 410 TOKEN_EXPIRED. Đổi mật khẩu và revoke mọi refresh token (đăng xuất mọi thiết bị). */
     @Override
     @Transactional
     public void resetPassword(String rawToken, String newPassword) {

@@ -11,7 +11,6 @@ import org.hibernate.type.SqlTypes;
 import java.time.Instant;
 import java.util.UUID;
 
-/** Response đã trả cho một Idempotency-Key, để request trùng nhận lại đúng response cũ. */
 @Entity
 @Table(name = "idempotency_records")
 @Getter
@@ -28,7 +27,6 @@ public class IdempotencyRecord {
     @Column(name = "idem_key", nullable = false, length = 100)
     private String idemKey;
 
-    /** SHA-256 hex của body request, để phát hiện cùng key nhưng body khác. */
     @Column(name = "request_hash", nullable = false, length = 64)
     private String requestHash;
 

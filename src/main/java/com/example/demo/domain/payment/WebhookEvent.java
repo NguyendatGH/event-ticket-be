@@ -10,10 +10,6 @@ import org.hibernate.type.SqlTypes;
 import java.time.Instant;
 import java.util.UUID;
 
-/**
- * Sổ ghi mọi webhook nhận được, kể cả sai chữ ký. Unique (provider, event_id) là lớp chống trùng thật:
- * insert trước khi xử lý, trùng thì DataIntegrityViolation.
- */
 @Entity
 @Table(name = "webhook_events")
 @Getter
@@ -62,7 +58,6 @@ public class WebhookEvent {
         return w;
     }
 
-    /** Webhook sai chữ ký vẫn ghi lại để audit; event_id là UUID vì không tin được payload. */
     public static WebhookEvent rejected(PaymentProvider provider, String rawPayload) {
         WebhookEvent w = received(provider, "rejected:" + UUID.randomUUID(), "payment", rawPayload);
         w.signatureValid = false;

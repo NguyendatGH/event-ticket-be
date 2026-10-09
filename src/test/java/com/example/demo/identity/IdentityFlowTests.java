@@ -27,11 +27,6 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * Tài khoản end-to-end qua HTTP (ui-api-contract §4.1, §4.2): phiên đăng nhập + refresh rotation (phát hiện token
- * bị dùng lại), đăng ký/nâng cấp organizer, hồ sơ, đổi/đặt lại mật khẩu, upload ảnh (kể cả 413 thật từ Tomcat), liên hệ.
- * Profile dev bật để kiểm tra devResetUrl.
- */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "app.jwt.secret=test-secret-test-secret-test-secret-1234",
         "app.storage.local-dir=target/test-uploads",
@@ -58,7 +53,6 @@ class IdentityFlowTests {
         jdbc.execute(new ClassPathResource("seed/seed-dev.sql").getContentAsString(StandardCharsets.UTF_8));
     }
 
-    /* ---------- helpers (RestClient không ném lỗi ở 4xx để đọc body problem+json) ---------- */
 
     private RestClient http() {
         return RestClient.builder().baseUrl("http://localhost:" + port)
@@ -98,7 +92,6 @@ class IdentityFlowTests {
         return res.getBody() == null ? null : res.getBody().get("code");
     }
 
-    /* ---------- auth ---------- */
 
     @Test
     void registerIssuesSessionAndRejectsDuplicateEmail() {
@@ -129,7 +122,6 @@ class IdentityFlowTests {
         assertNotEquals(r1, r2);
         assertEquals(200, call(HttpMethod.GET, "/api/v1/auth/me", access(first.getBody()), null).getStatusCode().value());
 
-        // r1 đã bị revoke mà bị dùng lại → nghi bị đánh cắp: 401 và r2 cũng mất hiệu lực
         var reuse = post("/api/v1/auth/refresh", null, Map.of("refreshToken", r1));
         assertEquals(401, reuse.getStatusCode().value());
         assertEquals("REFRESH_TOKEN_INVALID", code(reuse));
@@ -175,6 +167,50 @@ class IdentityFlowTests {
     }
 
     @Test
+    void organizerSetsOnePayoutAccount() {
+        var registered = post("/api/v1/auth/register-organizer", null, Map.of(
+                "fullName", "Organizer Bank Test", "email", email(), "password", "password123",
+                "organizerName", "Bank Account Test " + UUID.randomUUID().toString().substring(0, 6)));
+        assertEquals(201, registered.getStatusCode().value(), String.valueOf(registered.getBody()));
+        String token = access(registered.getBody());
+        Object organizerId = ((Map<?, ?>) ((Map<?, ?>) registered.getBody().get("user")).get("organizer")).get("id");
+
+        var empty = call(HttpMethod.GET, "/api/v1/organizer/payout-account", token, null);
+        assertEquals(200, empty.getStatusCode().value());
+        assertNull(empty.getBody().get("bankBin"));
+        assertEquals(false, empty.getBody().get("payoutSynced"), "Chưa khai tài khoản thì chưa có gì để đồng bộ");
+
+        var missingBin = call(HttpMethod.PUT, "/api/v1/organizer/payout-account", token, Map.of(
+                "accountName", "NGUYEN VAN A", "accountNumber", "1234567890"));
+        assertEquals(400, missingBin.getStatusCode().value());
+        assertEquals("BANK_BIN_REQUIRED", code(missingBin));
+
+        var unknownBin = call(HttpMethod.PUT, "/api/v1/organizer/payout-account", token, Map.of(
+                "bankBin", "999999", "accountName", "NGUYEN VAN A", "accountNumber", "1234567890"));
+        assertEquals(400, unknownBin.getStatusCode().value(), String.valueOf(unknownBin.getBody()));
+        assertEquals("UNKNOWN_BANK_BIN", code(unknownBin), "Đúng 6 chữ số nhưng không có trong danh mục thì phải trượt");
+
+        var shortAccount = call(HttpMethod.PUT, "/api/v1/organizer/payout-account", token, Map.of(
+                "bankBin", "970436", "accountName", "NGUYEN VAN A", "accountNumber", "1234 5"));
+        assertEquals(400, shortAccount.getStatusCode().value(), String.valueOf(shortAccount.getBody()));
+        assertEquals("INVALID_ACCOUNT_NUMBER", code(shortAccount));
+
+        var first = call(HttpMethod.PUT, "/api/v1/organizer/payout-account", token, Map.of(
+                "bankBin", "970436", "accountName", "NGUYEN VAN A", "accountNumber", "1234567890"));
+        assertEquals(200, first.getStatusCode().value(), String.valueOf(first.getBody()));
+        assertEquals("Vietcombank", first.getBody().get("bankName"), "Tên ngân hàng lấy từ danh mục theo BIN");
+        assertEquals("******7890", first.getBody().get("maskedAccountNumber"));
+        assertNull(first.getBody().get("accountNumber"), "API không trả số tài khoản đầy đủ");
+
+        var changed = call(HttpMethod.PUT, "/api/v1/organizer/payout-account", token, Map.of(
+                "bankBin", "970407", "accountName", "NGUYEN VAN A", "accountNumber", "9876543210"));
+        assertEquals(200, changed.getStatusCode().value(), String.valueOf(changed.getBody()));
+        assertEquals("Techcombank", changed.getBody().get("bankName"));
+        assertEquals(1, jdbc.queryForObject("select count(*) from organizer_bank_accounts where organizer_id = ?::uuid",
+                Integer.class, organizerId.toString()), "Đổi tài khoản là sửa, không chồng thêm dòng");
+    }
+
+    @Test
     void publicOrganizerCountsPublishedEvents() {
         var res = call(HttpMethod.GET, "/api/v1/organizers/sunrise-live", null, null);
         assertEquals(200, res.getStatusCode().value());
@@ -183,7 +219,6 @@ class IdentityFlowTests {
         assertEquals(404, call(HttpMethod.GET, "/api/v1/organizers/" + UUID.randomUUID(), null, null).getStatusCode().value());
     }
 
-    /** Tạo nhanh một sự kiện cho BTC (chỉ các cột bắt buộc); startDays âm = đã diễn ra. */
     private void insertEvent(Object organizerId, String status, int startDays) {
         jdbc.update("""
                 insert into events (id, slug, name, status, starts_at, ends_at, organizer_id)
@@ -209,11 +244,9 @@ class IdentityFlowTests {
     @Test
     void featuredOrganizersOrderedByVerifiedThenUpcomingEvents() {
         String suffix = UUID.randomUUID().toString().substring(0, 6);
-        // X: chỉ có sự kiện đã kết thúc + bản nháp → không lên trang chủ
         Object onlyPast = registerOrganizerId("BTC Đã Qua " + suffix);
         insertEvent(onlyPast, "PUBLISHED", -3);
         insertEvent(onlyPast, "DRAFT", 5);
-        // Y: chưa xác minh, 3 sự kiện sắp tới + 1 đã qua → eventsCount = 4 (cùng nghĩa trang chi tiết)
         Object busy = registerOrganizerId("BTC Bận Rộn " + suffix);
         for (int d = 1; d <= 3; d++) insertEvent(busy, "PUBLISHED", d * 10);
         insertEvent(busy, "UPCOMING", -10);
@@ -225,7 +258,6 @@ class IdentityFlowTests {
         assertEquals(4, ((Number) y.get("eventsCount")).intValue());
         assertEquals(y.get("eventsCount"), call(HttpMethod.GET, "/api/v1/organizers/" + y.get("slug"), null, null).getBody().get("eventsCount"));
 
-        // Oracle độc lập: số sự kiện chưa kết thúc theo BTC, đọc thẳng DB
         Map<String, Long> upcoming = new java.util.HashMap<>();
         jdbc.query("""
                 select organizer_id::text, count(*) from events
@@ -268,7 +300,7 @@ class IdentityFlowTests {
                 "website", "https://nhahat.vn", "contactPhone", ""));
         assertEquals(200, put.getStatusCode().value(), String.valueOf(put.getBody()));
         assertEquals("Tên Mới", put.getBody().get("name"));
-        assertEquals(profile.getBody().get("slug"), put.getBody().get("slug"));   // slug không đổi
+        assertEquals(profile.getBody().get("slug"), put.getBody().get("slug"));
         assertNull(put.getBody().get("contactEmail"));
 
         var invalid = call(HttpMethod.PUT, "/api/v1/organizer/profile", newToken, Map.of("name", "", "contactEmail", "not-an-email"));
@@ -286,7 +318,6 @@ class IdentityFlowTests {
         assertEquals("sunrise-live", mine.getBody().get("slug"));
     }
 
-    /** BCrypt giới hạn 72 byte: 30 chữ "ệ" = 30 ký tự nhưng 90 byte → 400 VALIDATION đúng field, không 401/500. */
     @Test
     void passwordOver72BytesIsValidationError() {
         String longPw = "ệ".repeat(30);
@@ -302,18 +333,15 @@ class IdentityFlowTests {
         assertEquals(400, change.getStatusCode().value());
         assertEquals("newPassword", ((Map<?, ?>) ((List<?>) change.getBody().get("errors")).get(0)).get("field"));
 
-        // 24 × "ệ" = 72 byte: vẫn hợp lệ
         assertEquals(201, post("/api/v1/auth/register", null,
                 Map.of("fullName", "Byte", "email", email(), "password", "ệ".repeat(24))).getStatusCode().value());
     }
 
-    /** /error mở cho khách vãng lai: lỗi thật không bị che thành 401 "cần đăng nhập". */
     @Test
     void errorPathIsNotHiddenBehind401() {
         assertNotEquals(401, call(HttpMethod.GET, "/error", null, null).getStatusCode().value());
     }
 
-    /* ---------- users/me ---------- */
 
     @Test
     void updateProfileAndChangePassword() {
@@ -341,7 +369,6 @@ class IdentityFlowTests {
         assertEquals(401, call(HttpMethod.GET, "/api/v1/users/me", null, null).getStatusCode().value());
     }
 
-    /* ---------- quên / đặt lại mật khẩu ---------- */
 
     @Test
     void forgotAndResetPassword() {
@@ -360,7 +387,6 @@ class IdentityFlowTests {
         assertTrue(url.startsWith("http://localhost:3000/auth/reset-password?token="), url);
         String token = url.substring(url.indexOf("token=") + 6);
 
-        // Link cũ mất hiệu lực khi xin link mới
         var old = post("/api/v1/auth/reset-password", null, Map.of("token", oldUrl.substring(oldUrl.indexOf("token=") + 6), "password", "reset12345"));
         assertEquals("TOKEN_INVALID", code(old));
 
@@ -382,7 +408,6 @@ class IdentityFlowTests {
         assertEquals("TOKEN_EXPIRED", code(expired));
     }
 
-    /* ---------- upload ---------- */
 
     @SuppressWarnings("unchecked")
     private ResponseEntity<Map> upload(String token, byte[] data, String folder) {
@@ -419,7 +444,6 @@ class IdentityFlowTests {
         assertEquals("FILE_TOO_LARGE", code(tooLarge));
     }
 
-    /* ---------- liên hệ ---------- */
 
     @Test
     void contactMessageIsStoredWithUserWhenLoggedIn() {

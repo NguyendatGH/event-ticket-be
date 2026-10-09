@@ -48,7 +48,6 @@ public class OrganizerEventQueriesImpl implements OrganizerEventQueries {
         this.jdbc = jdbc;
     }
 
-    /** GET /organizer/events. status nhận thêm ENDED (trạng thái tính: đang liệt kê nhưng đã qua giờ kết thúc). */
     @Override
     @Transactional(readOnly = true)
     public PageResponse<OrganizerEventSummary> list(UUID userId, String status, String q, int page, int size) {
@@ -80,7 +79,6 @@ public class OrganizerEventQueriesImpl implements OrganizerEventQueries {
                 .query(UUID.class)
                 .list();
 
-        // Nạp entity + số liệu cho cả trang bằng 2 query (không N+1), rồi giữ đúng thứ tự id của SQL
         Map<UUID, Event> byId = events.findAllById(ids).stream().collect(Collectors.toMap(Event::getId, Function.identity()));
         Map<UUID, EventStats> stats = stats(ids);
         Instant now = Instant.now();
@@ -97,7 +95,6 @@ public class OrganizerEventQueriesImpl implements OrganizerEventQueries {
         return detail(access.ownEvent(userId, eventId));
     }
 
-    /** GET /organizer/events/{id}/orders: q khớp mã đơn, email hoặc tên khách. */
     @Override
     @Transactional(readOnly = true)
     public PageResponse<OrganizerOrderRow> orders(UUID userId, UUID eventId, String status, String q, int page, int size) {
@@ -133,16 +130,11 @@ public class OrganizerEventQueriesImpl implements OrganizerEventQueries {
         return Pages.response(content, p, s, total);
     }
 
-    /**
-     * Chi tiết + số liệu theo hạng vé. CỐ Ý không @Transactional: OrganizerEventService gọi ngay sau khi ghi nên hàm này
-     * chạy trong transaction ghi đang mở; gắn readOnly ở đây có thể lan chế độ chỉ-đọc sang transaction bên gọi.
-     */
     @Override
     public OrganizerEventDetail detail(Event e) {
         Map<UUID, TierNumbers> numbers = tierNumbers(e.getId());
         List<OrganizerEventDetail.Tier> tierDtos = tiersOf(e.getId()).stream().map(t -> {
             TierNumbers n = numbers.getOrDefault(t.getId(), TierNumbers.EMPTY);
-            // Vé không còn trong kho mà chưa phát ra = đang được giữ bởi đơn chờ thanh toán
             long reserved = Math.max(0, t.getTotalQuantity() - n.available() - n.sold());
             return new OrganizerEventDetail.Tier(t.getId(), t.getName(), t.getDescription(), t.getPrice(),
                     t.getTotalQuantity(), t.getMaxPerOrder(), n.sold(), reserved, n.available(), n.revenue());
@@ -152,7 +144,6 @@ public class OrganizerEventQueriesImpl implements OrganizerEventQueries {
                 new OrganizerEventDetail.Stats(st.sold(), st.total(), st.revenue(), st.ordersPaid(), st.ordersPending()));
     }
 
-    /** Thứ tự ổn định (giá, rồi thời điểm tạo) để chỉ số tiers[i] trong lỗi publish khớp với danh sách FE đang hiển thị. */
     @Override
     public List<TicketTier> tiersOf(UUID eventId) {
         return tiers.findAllByEventIdOrderByPriceAsc(eventId).stream()
@@ -166,7 +157,6 @@ public class OrganizerEventQueriesImpl implements OrganizerEventQueries {
         static final TierNumbers EMPTY = new TierNumbers(0, 0, 0);
     }
 
-    /** Theo từng hạng vé: còn trong kho, số vé đã phát, doanh thu từ đơn đã PAID. */
     private Map<UUID, TierNumbers> tierNumbers(UUID eventId) {
         Map<UUID, TierNumbers> out = new HashMap<>();
         jdbc.sql("""
@@ -191,7 +181,6 @@ public class OrganizerEventQueriesImpl implements OrganizerEventQueries {
         static final EventStats EMPTY = new EventStats(0, 0, 0, 0, 0, 0, 0);
     }
 
-    /** Một query cho cả trang: tổng vé, còn lại, số hạng vé, đã phát, doanh thu và số đơn theo sự kiện. */
     private Map<UUID, EventStats> stats(List<UUID> eventIds) {
         if (eventIds.isEmpty()) return Map.of();
         Map<UUID, EventStats> out = new HashMap<>();
@@ -220,7 +209,6 @@ public class OrganizerEventQueriesImpl implements OrganizerEventQueries {
         return out;
     }
 
-    /** Cùng luật với trang công khai: SOLD_OUT khi PUBLISHED, có hạng vé và kho đã hết; ENDED khi đã qua giờ kết thúc. */
     private static String displayStatus(Event e, EventStats st, Instant now) {
         boolean soldOut = e.getStatus() == EventStatus.PUBLISHED && st.tierCount() > 0 && st.available() == 0;
         return e.displayStatus(soldOut, now);

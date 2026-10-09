@@ -10,7 +10,6 @@ import lombok.NoArgsConstructor;
 
 import java.util.UUID;
 
-/** Một vé trong một refund, kèm số tiền hoàn cho vé đó (giá trừ phí hủy). */
 @Entity
 @Table(name = "refund_items")
 @Getter

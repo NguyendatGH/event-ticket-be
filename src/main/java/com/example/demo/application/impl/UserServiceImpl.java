@@ -52,7 +52,6 @@ public class UserServiceImpl implements UserService {
         return toResponse(user);
     }
 
-    /** 400 WRONG_PASSWORD (errors field currentPassword) nếu mật khẩu hiện tại sai. Các phiên khác vẫn giữ. */
     @Override
     @Transactional
     public void changePassword(UUID userId, ChangePasswordRequest req) {
@@ -64,7 +63,6 @@ public class UserServiceImpl implements UserService {
         user.changePasswordHash(passwordEncoder.encode(req.newPassword()));
     }
 
-    /** JWT còn hạn nhưng user đã bị xóa → 401 để FE đăng xuất. */
     @Override
     public User requireUser(UUID userId) {
         return users.findById(userId)

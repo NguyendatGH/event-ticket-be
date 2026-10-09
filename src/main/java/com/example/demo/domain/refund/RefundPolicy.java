@@ -11,10 +11,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/**
- * Điều kiện được hoàn và số tiền hoàn từng vé. Phí dịch vụ của đơn (fee_amount) KHÔNG hoàn.
- * Thuần domain, không Spring, để unit test không cần context.
- */
 public final class RefundPolicy {
 
     private final int feePercent;
@@ -24,7 +20,6 @@ public final class RefundPolicy {
         this.feePercent = feePercent;
     }
 
-    /** Ném DomainException nếu không hoàn được. Trả về map ticketId -> số tiền hoàn. */
     public Map<UUID, Long> check(Order order, Event event, List<Ticket> tickets, Instant now) {
         if (!order.isRefundable()) {
             throw DomainException.conflict("ORDER_NOT_REFUNDABLE",

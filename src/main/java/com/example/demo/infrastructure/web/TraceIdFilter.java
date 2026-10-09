@@ -1,5 +1,6 @@
 package com.example.demo.infrastructure.web;
 
+import com.example.demo.domain.common.LogContext;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -14,10 +15,6 @@ import java.io.IOException;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
-/**
- * trace_id cho mọi request: lấy X-Request-Id của client hoặc sinh UUID, đưa vào MDC (LogPrefixConverter in ra)
- * và trả lại trong header. Chạy trước Spring Security nên body 401/403 cũng có traceId.
- */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class TraceIdFilter extends OncePerRequestFilter {
@@ -37,6 +34,7 @@ public class TraceIdFilter extends OncePerRequestFilter {
             chain.doFilter(req, res);
         } finally {
             MDC.remove(MDC_KEY);
+            LogContext.clear();
         }
     }
 }

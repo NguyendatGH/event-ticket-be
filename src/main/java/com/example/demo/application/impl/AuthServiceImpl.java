@@ -65,14 +65,12 @@ public class AuthServiceImpl implements AuthService {
         this.refreshTtl = refreshTtl;
     }
 
-    /** Tạo user role CUSTOMER và phát phiên. 409 EMAIL_ALREADY_USED nếu email đã tồn tại. */
     @Transactional
     @Override
     public AuthResponse register(RegisterRequest req) {
         return session(createUser(req.fullName(), req.email(), req.password(), UserRole.CUSTOMER));
     }
 
-    /** Một transaction: user ORGANIZER + hồ sơ BTC (slug duy nhất từ tên), rồi phát phiên. */
     @Transactional
     @Override
     public AuthResponse registerOrganizer(RegisterOrganizerRequest req) {
@@ -82,12 +80,10 @@ public class AuthServiceImpl implements AuthService {
         return session(user);
     }
 
-    /** Kiểm tra email/password, phát phiên. Sai → BadCredentialsException (GlobalExceptionHandler trả 401 BAD_CREDENTIALS). */
     @Transactional
     @Override
     public AuthResponse login(LoginRequest req) {
         String email = AuthService.normalizeEmail(req.email());
-        // Spring Security so khớp hash BCrypt; ném BadCredentialsException nếu email không tồn tại hoặc password sai
         authenticationManager.authenticate(
                 UsernamePasswordAuthenticationToken.unauthenticated(email, req.password()));
 
@@ -121,7 +117,6 @@ public class AuthServiceImpl implements AuthService {
         return session(user);
     }
 
-    /** Revoke refresh token; token lạ bỏ qua (đăng xuất luôn thành công). */
     @Transactional
     @Override
     public void logout(String rawRefreshToken) {
@@ -129,7 +124,6 @@ public class AuthServiceImpl implements AuthService {
                 .ifPresent(t -> refreshTokens.revokeIfActive(t.getId(), Instant.now()));
     }
 
-    /** CUSTOMER → ORGANIZER + tạo hồ sơ BTC, phát phiên mới (JWT mới mang role mới). 409 ALREADY_ORGANIZER. */
     @Transactional
     @Override
     public AuthResponse becomeOrganizer(UUID userId, OrganizerProfileRequest req) {
@@ -137,7 +131,7 @@ public class AuthServiceImpl implements AuthService {
         if (organizers.findByUserId(userId).isPresent()) {
             throw DomainException.conflict("ALREADY_ORGANIZER", "Tài khoản đã có hồ sơ ban tổ chức");
         }
-        user.promoteToOrganizer();   // ADMIN giữ nguyên role, vẫn được tạo hồ sơ
+        user.promoteToOrganizer();
         organizerService.create(userId, req);
         return session(users.saveAndFlush(user));
     }
@@ -154,10 +148,6 @@ public class AuthServiceImpl implements AuthService {
                 role));
     }
 
-    /**
-     * Tài khoản Google không có mật khẩu nhưng password_hash là NOT NULL và login mật khẩu vẫn phải từ chối họ
-     * → lưu hash của chuỗi ngẫu nhiên không ai biết. Muốn đăng nhập mật khẩu thì dùng "Quên mật khẩu".
-     */
     private User createGoogleUser(GoogleIdTokenVerifier.GoogleAccount account, String email) {
         String fullName = account.fullName() == null || account.fullName().isBlank()
                 ? email.split("@")[0]
@@ -169,7 +159,6 @@ public class AuthServiceImpl implements AuthService {
                 account.pictureUrl()));
     }
 
-    /** Phát access token (JWT, sống ngắn) + refresh token mới (opaque, DB chỉ lưu sha256 của nó). */
     private AuthResponse session(User user) {
         String raw = OpaqueTokens.generate();
         refreshTokens.save(RefreshToken.create(user.getId(), OpaqueTokens.sha256Hex(raw), Instant.now().plus(refreshTtl)));

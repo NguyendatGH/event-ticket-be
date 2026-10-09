@@ -10,6 +10,7 @@ import com.example.demo.domain.event.EventStatus;
 import com.example.demo.domain.event.TicketTier;
 import com.example.demo.domain.event.Venue;
 import com.example.demo.domain.inventory.Inventory;
+import com.example.demo.domain.payment.PaymentProvider;
 import com.example.demo.domain.refund.RefundStatus;
 import com.example.demo.infrastructure.mail.CustomerRefundMailInfo;
 import com.example.demo.infrastructure.mail.Mailer;
@@ -39,6 +40,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -50,14 +52,10 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
-/**
- * Refund end-to-end qua test double (không tốn tiền, không cần mạng): tạo đơn -> trả tiền -> hoàn theo vé ->
- * chốt kết quả -> hoàn kho. Phủ các nhánh dễ mất tiền: gửi trùng, timeout lúc gửi, ví thiếu, đích lạ, hoàn quá số đã thu.
- */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "app.jwt.secret=test-secret-test-secret-test-secret-1234",
         "DB_URL=unused", "DB_USERNAME=unused", "DB_PASSWORD=unused",
-        "app.refund.poll-interval=PT1H",        // job tự chạy sẽ làm test bất định; test tự gọi
+        "app.refund.poll-interval=PT1H",
         "app.refund.queue-interval=PT1H",
         "app.refund.recovery-interval=PT1H"
 })
@@ -82,22 +80,15 @@ class RefundFlowTests {
     @Autowired WalletService wallet;
     @Autowired JdbcTemplate jdbc;
 
-    /**
-     * Thay Mailer thật bằng mock: test đếm được số mail mà không cần SMTP (và không gửi mail thật khi chạy CI).
-     * Spring tự reset mock sau MỖI test nên số đếm của test này không lẫn sang test khác.
-     */
     @MockitoBean Mailer mailer;
 
-    /* ---------- helpers ---------- */
 
-    /** Đơn hàng giờ bắt buộc đăng nhập, nên mọi request mặc định mang token của người mua. */
     private RestClient http() {
         return RestClient.builder().baseUrl("http://localhost:" + port)
                 .defaultStatusHandler(status -> true, (req, res) -> { })
                 .defaultHeaders(h -> h.setBearerAuth(token())).build();
     }
 
-    /** Không token: dùng để kiểm endpoint có thật sự chặn khách chưa đăng nhập. */
     private RestClient anon() {
         return RestClient.builder().baseUrl("http://localhost:" + port)
                 .defaultStatusHandler(status -> true, (req, res) -> { }).build();
@@ -110,7 +101,6 @@ class RefundFlowTests {
         return token;
     }
 
-    /** Đăng ký một người mua mới và trả accessToken. Email ngẫu nhiên để các test không giẫm nhau. */
     @SuppressWarnings("unchecked")
     private String register() {
         Map<?, ?> auth = anon().post().uri("/api/v1/auth/register")
@@ -120,7 +110,6 @@ class RefundFlowTests {
         return (String) auth.get("accessToken");
     }
 
-    /** BTC thật: user role ORGANIZER + hồ sơ BTC trong một bước. Trả accessToken. */
     @SuppressWarnings("unchecked")
     private String registerOrganizer(String email) {
         Map<?, ?> auth = anon().post().uri("/api/v1/auth/register-organizer")
@@ -135,7 +124,6 @@ class RefundFlowTests {
                 UUID.class, email);
     }
 
-    /** RestClient mang token của BTC; http() mặc định là token người mua. */
     private RestClient as(String token) {
         return RestClient.builder().baseUrl("http://localhost:" + port)
                 .defaultStatusHandler(status -> true, (req, res) -> { })
@@ -148,14 +136,12 @@ class RefundFlowTests {
                 .body(Map.of("outcome", outcome, "note", "da chuyen khoan tay")).retrieve().toEntity(Map.class);
     }
 
-    /** Body resolve tự do: cần cho ca gửi thiếu field (CANCELLED mà không có note). */
     @SuppressWarnings("unchecked")
     private ResponseEntity<Map> resolveAsOrganizer(String token, UUID refundId, Map<String, Object> body) {
         return as(token).post().uri("/api/v1/organizer/refunds/" + refundId + "/resolve")
                 .body(body).retrieve().toEntity(Map.class);
     }
 
-    /** Lệnh hủy yêu cầu hoàn tiền (không đổi đích nên destination = null). */
     private static ResolveRefundRequest cancel(String note) {
         return new ResolveRefundRequest(ResolveRefundRequest.Outcome.CANCELLED, note, null);
     }
@@ -170,7 +156,6 @@ class RefundFlowTests {
         return http().post().uri(path).retrieve().toEntity(Map.class);
     }
 
-    /** startsAt xa hơn hạn hủy 48h, nếu không mọi refund đều bị REFUND_DEADLINE_PASSED. */
     private Event event() {
         return event(Instant.now().plusSeconds(10 * 86_400));
     }
@@ -195,7 +180,6 @@ class RefundFlowTests {
         return inventory.findById(t.getId()).orElseThrow().getAvailable();
     }
 
-    /** Đơn đã PAID kèm vé đã cấp. */
     @SuppressWarnings("unchecked")
     private Map<?, ?> paidOrder(Event e, TicketTier t, int qty) {
         Map<String, Object> body = Map.of("eventId", e.getId(),
@@ -209,7 +193,6 @@ class RefundFlowTests {
         return paid;
     }
 
-    /** Đơn đã PAID, với mã ngân hàng người trả do test chỉ định (rỗng = ví điện tử không trả bank). */
     @SuppressWarnings("unchecked")
     private Map<?, ?> paidOrderWithPayerBank(Event e, TicketTier t, String payerBankBin) {
         Map<String, Object> body = Map.of("eventId", e.getId(),
@@ -227,18 +210,12 @@ class RefundFlowTests {
         return ((List<Map<String, Object>>) order.get("tickets")).stream().map(t -> (String) t.get("id")).toList();
     }
 
-    /**
-     * Email liên hệ mặc định cho các test không quan tâm tới nó. Cố ý KHÁC "a@example.com" (email lúc mua
-     * của paidOrder) để nếu code nào lẫn hai thứ này thì test mail hủy refund sẽ chỉ ra ngay.
-     */
     private static final String CONTACT_EMAIL = "lien-he@example.com";
 
-    /** contactEmail là field BẮT BUỘC của body nên gom vào đây một chỗ, mọi test tạo refund đi qua hàm này. */
     private ResponseEntity<Map> requestRefund(Object orderId, List<String> ticketIds, String key, Map<String, String> destination) {
         return requestRefund(orderId, ticketIds, key, destination, CONTACT_EMAIL);
     }
 
-    /** Bản chỉ định rõ contactEmail: cần cho ca kiểm chuẩn hóa email và ca mail hủy phải đi tới đúng hộp thư. */
     private ResponseEntity<Map> requestRefund(Object orderId, List<String> ticketIds, String key,
                                               Map<String, String> destination, String contactEmail) {
         Map<String, Object> body = destination == null
@@ -248,7 +225,6 @@ class RefundFlowTests {
         return postRefund(orderId, key, body);
     }
 
-    /** Body tự do: cần cho ca gửi thiếu field (không có contactEmail) hoặc email sai định dạng. */
     @SuppressWarnings("unchecked")
     private ResponseEntity<Map> postRefund(Object orderId, String key, Map<String, Object> body) {
         return http().post().uri("/api/v1/orders/" + orderId + "/refunds")
@@ -264,7 +240,6 @@ class RefundFlowTests {
         return jdbc.queryForObject("select status from tickets where id = ?::uuid", String.class, ticketId);
     }
 
-    /* ---------- happy path ---------- */
 
     @Test
     void refundAllTicketsSettlesOrderAndReturnsInventory() {
@@ -285,7 +260,6 @@ class RefundFlowTests {
         assertEquals("REFUND_PROCESSING", get("/api/v1/orders/" + order.get("id")).getBody().get("status"));
         ids.forEach(id -> assertEquals("REFUND_PENDING", ticketStatus(id)));
 
-        // provider chốt thành công -> webhook về
         post("/mock-gateway/refunds/" + r.get("id") + "/succeed");
 
         assertEquals("SUCCEEDED", refund(r.get("id")).get("status"));
@@ -368,7 +342,6 @@ class RefundFlowTests {
         assertEquals(9, available(t), "chỉ cộng lại 1 vé");
     }
 
-    /* ---------- các nhánh dễ mất tiền ---------- */
 
     @Test
     void sameIdempotencyKeyDoesNotCreateSecondRefund() {
@@ -398,10 +371,6 @@ class RefundFlowTests {
         assertEquals("ORDER_NOT_REFUNDABLE", second.getBody().get("code"));
     }
 
-    /**
-     * Bài học từ refund-mvp: provider ĐÃ nhận lệnh nhưng response rớt. Gửi lại phải dùng CÙNG key
-     * để provider trả lệnh cũ, tuyệt đối không tạo lệnh chi thứ hai.
-     */
     @Test
     void timeoutAfterProviderReceivedDoesNotPayTwice() {
         Event e = event();
@@ -412,7 +381,6 @@ class RefundFlowTests {
 
         Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(), null).getBody();
 
-        // submit() tra lại theo key ngay khi timeout -> nhận đúng lệnh provider đã tạo
         assertEquals("PROCESSING", r.get("status"), String.valueOf(r));
         assertNotNull(r.get("providerRefundId"));
         long reservedAfter = ((Number) get("/mock-gateway/balance").getBody().get("reserved")).longValue();
@@ -430,13 +398,13 @@ class RefundFlowTests {
         TicketTier t = tier(e, 10, 200_000);
         Map<?, ?> order = paidOrder(e, t, 1);
         long original = ((Number) get("/mock-gateway/balance").getBody().get("balance")).longValue();
-        post("/mock-gateway/balance?amount=1000");                       // ví gần cạn
+        post("/mock-gateway/balance?amount=1000");
 
         Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(), null).getBody();
         assertEquals("AWAITING_FUNDS", r.get("status"), String.valueOf(r));
         assertEquals("INSUFFICIENT_PAYOUT_BALANCE", r.get("failureCode"));
 
-        post("/mock-gateway/balance?amount=" + original);                // nạp ví
+        post("/mock-gateway/balance?amount=" + original);
         refundService.drainQueue();
 
         assertEquals("PROCESSING", refund(r.get("id")).get("status"));
@@ -497,11 +465,10 @@ class RefundFlowTests {
         assertEquals(1L, rejected, "vẫn phải ghi sổ webhook ký sai");
     }
 
-    /* ---------- chính sách và đích đến ---------- */
 
     @Test
     void refundAfterDeadlineIsRejected() {
-        Event e = event(Instant.now().plusSeconds(24 * 3600));       // trong hạn 48h -> quá hạn hủy
+        Event e = event(Instant.now().plusSeconds(24 * 3600));
         TicketTier t = tier(e, 10, 200_000);
         Map<?, ?> order = paidOrder(e, t, 1);
 
@@ -541,7 +508,6 @@ class RefundFlowTests {
         TicketTier t = tier(e, 10, 200_000);
         Map<?, ?> order = paidOrder(e, t, 1);
 
-        // cửa test của mock: số tài khoản tận cùng 000 -> provider từ chối đích
         Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(),
                 Map.of("bin", "970422", "accountNumber", "1234567000")).getBody();
         UUID refundId = UUID.fromString((String) r.get("id"));
@@ -560,26 +526,19 @@ class RefundFlowTests {
         Map<?, ?> order = paidOrder(e, t, 1);
         Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(), null).getBody();
         UUID refundId = UUID.fromString((String) r.get("id"));
-        post("/mock-gateway/refunds/" + refundId + "/hold");            // provider treo -> MANUAL_REVIEW
+        post("/mock-gateway/refunds/" + refundId + "/hold");
         assertEquals("MANUAL_REVIEW", refund(refundId).get("status"));
 
-        // Lệnh đã nằm ở provider: RETRY là chi hai lần, phải bị chặn
         DomainException ex = org.junit.jupiter.api.Assertions.assertThrows(DomainException.class,
                 () -> refundService.resolve(refundId, new ResolveRefundRequest(ResolveRefundRequest.Outcome.RETRY, "thử lại", null)));
         assertEquals("REFUND_ALREADY_AT_PROVIDER", ex.getCode());
 
-        // Đường đúng: BTC tra dashboard rồi chốt tay
         refundService.resolve(refundId, new ResolveRefundRequest(ResolveRefundRequest.Outcome.SUCCEEDED, "đã thấy tiền đi", null));
         assertEquals("SUCCEEDED", refund(refundId).get("status"));
         assertEquals(10, available(t));
     }
 
-    /* ---------- BTC duyệt refund: đường DUY NHẤT chốt tay, admin không nắm tiền nên không có cửa ---------- */
 
-    /**
-     * Một lượt đủ ba bước của BTC: thấy hàng chờ -> lấy QR -> chốt SUCCEEDED, và BTC khác thì 404.
-     * Vỡ bất kỳ bước nào là refund tài khoản lạ không còn ai chốt được.
-     */
     @Test
     @SuppressWarnings("unchecked")
     void organizerListsInstructsAndResolvesOnlyOwnRefund() {
@@ -589,7 +548,6 @@ class RefundFlowTests {
         TicketTier t = tier(e, 10, 200_000);
         Map<?, ?> order = paidOrder(e, t, 1);
 
-        // đích khác tài khoản đã trả -> MANUAL_REVIEW, chờ chính BTC duyệt
         Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(),
                 Map.of("bin", "970422", "accountNumber", "1234567891")).getBody();
         UUID refundId = UUID.fromString((String) r.get("id"));
@@ -605,34 +563,162 @@ class RefundFlowTests {
         assertEquals(200_000, ((Number) ins.get("amount")).longValue());
         assertTrue(((String) ins.get("qrImageUrl")).startsWith("https://img.vietqr.io/image/"), String.valueOf(ins));
 
-        // BTC của sự kiện khác: 404, không lộ id có tồn tại
         ResponseEntity<Map> stranger = resolveAsOrganizer(
                 registerOrganizer("btc2-" + UUID.randomUUID() + "@example.com"), refundId, "SUCCEEDED");
         assertEquals(404, stranger.getStatusCode().value(), String.valueOf(stranger.getBody()));
         assertEquals("MANUAL_REVIEW", refund(refundId).get("status"), "BTC khác không được chốt");
 
-        // chuyển khoản xong -> chốt; đi chung RefundResultHandler nên kho cộng đúng một lần
         assertEquals(200, resolveAsOrganizer(btc, refundId, "SUCCEEDED").getStatusCode().value());
         assertEquals("SUCCEEDED", refund(refundId).get("status"));
         assertEquals(10, available(t));
     }
 
-    /* ---------- thông báo cho BTC: chỉ họ nạp được ví / chuyển khoản tay ---------- */
 
-    /**
-     * Ví chi hết tiền: BTC phải nhận ĐÚNG MỘT mail, kể cả khi RefundQueueJob quét lại nhiều vòng.
-     * Vỡ test này nghĩa là một trong hai điều tệ: refund kẹt mà không ai được báo, hoặc BTC bị spam mỗi 60 giây.
-     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void walletJustEnoughForThisRefundPaysOutWithoutQueueing() {
+        String email = "btc-" + UUID.randomUUID() + "@example.com";
+        String organizer = registerOrganizer(email);
+        Event e = event(Instant.now().plusSeconds(10 * 86_400), organizerId(email));
+        TicketTier t = tier(e, 10, 200_000);
+        long original = ((Number) get("/mock-gateway/balance").getBody().get("balance")).longValue();
+
+        Map<?, ?> order = paidOrder(e, t, 1);
+        leaveInWallet(300_000);
+        Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(), null).getBody();
+        assertEquals("PROCESSING", r.get("status"), String.valueOf(r));
+        post("/mock-gateway/refunds/" + r.get("id") + "/succeed");
+
+        Map<?, ?> other = paidOrder(e, t, 1);
+        Map<?, ?> r2 = requestRefund(other.get("id"), ticketIds(other), UUID.randomUUID().toString(),
+                Map.of("bin", "970422", "accountNumber", "1234567891")).getBody();
+        assertEquals("MANUAL_REVIEW", r2.get("status"), String.valueOf(r2));
+        leaveInWallet(300_000);
+        assertEquals(200, resolveAsOrganizer(organizer, UUID.fromString((String) r2.get("id")), "RETRY").getStatusCode().value());
+        assertEquals("PROCESSING", refund(r2.get("id")).get("status"));
+        post("/mock-gateway/refunds/" + r2.get("id") + "/succeed");
+
+        verify(mailer, never()).sendRefundAwaitingFunds(any(), any());
+        assertEquals(10, available(t));
+        post("/mock-gateway/balance?amount=" + original);
+    }
+
+    private void leaveInWallet(long free) {
+        Map<?, ?> mock = get("/mock-gateway/balance").getBody();
+        long balance = ((Number) mock.get("balance")).longValue();
+        long heldByEncore = balance - wallet.available(PaymentProvider.MOCK);
+        long heldByMock = ((Number) mock.get("reserved")).longValue();
+        post("/mock-gateway/balance?amount=" + (Math.max(heldByEncore, heldByMock) + free));
+    }
+
+    @Test
+    void destinationReviewMailsOrganizerOnce() {
+        String email = "btc-" + UUID.randomUUID() + "@example.com";
+        registerOrganizer(email);
+        Event e = event(Instant.now().plusSeconds(10 * 86_400), organizerId(email));
+        TicketTier t = tier(e, 10, 200_000);
+        Map<?, ?> order = paidOrder(e, t, 1);
+        String key = UUID.randomUUID().toString();
+        Map<String, String> other = Map.of("bin", "970422", "accountNumber", "1234567891");
+
+        Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), key, other).getBody();
+        assertEquals("MANUAL_REVIEW", r.get("status"), String.valueOf(r));
+        ArgumentCaptor<RefundMailInfo> sent = ArgumentCaptor.forClass(RefundMailInfo.class);
+        verify(mailer).sendRefundNeedsReview(eq(email), sent.capture());
+        assertEquals("DESTINATION_REVIEW", sent.getValue().reasonCode());
+
+        requestRefund(order.get("id"), ticketIds(order), key, other);
+        verify(mailer, times(1)).sendRefundNeedsReview(eq(email), any());
+    }
+
+    @Test
+    void processingTimeoutMailsOrganizerOnce() {
+        String email = "btc-" + UUID.randomUUID() + "@example.com";
+        registerOrganizer(email);
+        Event e = event(Instant.now().plusSeconds(10 * 86_400), organizerId(email));
+        TicketTier t = tier(e, 10, 200_000);
+        Map<?, ?> order = paidOrder(e, t, 1);
+        Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(), null).getBody();
+        assertEquals("PROCESSING", r.get("status"), String.valueOf(r));
+        jdbc.update("update refunds set submitted_at = now() - interval '2 hours' where id = ?::uuid", r.get("id"));
+
+        refundService.pollProcessing();
+        assertEquals("MANUAL_REVIEW", refund(r.get("id")).get("status"));
+        ArgumentCaptor<RefundMailInfo> sent = ArgumentCaptor.forClass(RefundMailInfo.class);
+        verify(mailer).sendRefundNeedsReview(eq(email), sent.capture());
+        assertEquals("PROCESSING_TIMEOUT", sent.getValue().reasonCode());
+
+        refundService.pollProcessing();
+        verify(mailer, times(1)).sendRefundNeedsReview(eq(email), any());
+    }
+
+    @Test
+    void providerHoldMailsOrganizer() {
+        String email = "btc-" + UUID.randomUUID() + "@example.com";
+        registerOrganizer(email);
+        Event e = event(Instant.now().plusSeconds(10 * 86_400), organizerId(email));
+        TicketTier t = tier(e, 10, 200_000);
+        Map<?, ?> order = paidOrder(e, t, 1);
+        Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(), null).getBody();
+
+        post("/mock-gateway/refunds/" + r.get("id") + "/hold");
+        assertEquals("MANUAL_REVIEW", refund(r.get("id")).get("status"));
+        ArgumentCaptor<RefundMailInfo> sent = ArgumentCaptor.forClass(RefundMailInfo.class);
+        verify(mailer).sendRefundNeedsReview(eq(email), sent.capture());
+        assertEquals("ON_HOLD", sent.getValue().reasonCode());
+    }
+
+    @Test
+    void customerIsMailedWhenRefundSucceedsOrFails() {
+        Event e = event();
+        TicketTier t = tier(e, 10, 200_000);
+
+        Map<?, ?> order = paidOrder(e, t, 1);
+        Map<?, ?> ok = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(), null).getBody();
+        verify(mailer, never()).sendRefundSucceededToCustomer(any(), any(), any());
+        post("/mock-gateway/refunds/" + ok.get("id") + "/succeed");
+        ArgumentCaptor<CustomerRefundMailInfo> info = ArgumentCaptor.forClass(CustomerRefundMailInfo.class);
+        ArgumentCaptor<String> destination = ArgumentCaptor.forClass(String.class);
+        verify(mailer).sendRefundSucceededToCustomer(eq(CONTACT_EMAIL), info.capture(), destination.capture());
+        assertEquals(200_000, info.getValue().amount());
+        String account = jdbc.queryForObject("select destination_account from refunds where id = ?::uuid", String.class, ok.get("id"));
+        assertTrue(destination.getValue().endsWith("••••" + account.substring(account.length() - 4)), destination.getValue());
+        assertFalse(destination.getValue().contains(account), "không được lộ số tài khoản đầy đủ trong mail");
+
+        Map<?, ?> other = paidOrder(e, t, 1);
+        Map<?, ?> bad = requestRefund(other.get("id"), ticketIds(other), UUID.randomUUID().toString(),
+                Map.of("bin", "970422", "accountNumber", "1234567000")).getBody();
+        refundService.resolve(UUID.fromString((String) bad.get("id")),
+                new ResolveRefundRequest(ResolveRefundRequest.Outcome.RETRY, "BTC duyệt", null));
+        assertEquals("FAILED", refund(bad.get("id")).get("status"));
+        verify(mailer).sendRefundFailedToCustomer(eq(CONTACT_EMAIL), any(), eq("INVALID_DESTINATION"));
+        verify(mailer, times(1)).sendRefundSucceededToCustomer(any(), any(), any());
+    }
+
+    @Test
+    void organizerCancelSendsOnlyTheCancelMail() {
+        Event e = event();
+        TicketTier t = tier(e, 10, 200_000);
+        Map<?, ?> order = paidOrder(e, t, 1);
+        Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(),
+                Map.of("bin", "970422", "accountNumber", "1234567891")).getBody();
+
+        refundService.resolve(UUID.fromString((String) r.get("id")), cancel("khách đồng ý giữ vé"));
+
+        verify(mailer, times(1)).sendRefundCancelledToCustomer(eq(CONTACT_EMAIL), any());
+        verify(mailer, never()).sendRefundFailedToCustomer(any(), any(), any());
+    }
+
     @Test
     @SuppressWarnings("unchecked")
     void emptyWalletMailsOrganizerExactlyOnce() {
         String email = "btc-" + UUID.randomUUID() + "@example.com";
-        registerOrganizer(email);   // BTC chưa khai contactEmail -> mail phải fallback về email user chủ tài khoản
+        registerOrganizer(email);
         Event e = event(Instant.now().plusSeconds(10 * 86_400), organizerId(email));
         TicketTier t = tier(e, 10, 200_000);
         Map<?, ?> order = paidOrder(e, t, 1);
         long original = ((Number) get("/mock-gateway/balance").getBody().get("balance")).longValue();
-        post("/mock-gateway/balance?amount=1000");                        // ví gần cạn
+        post("/mock-gateway/balance?amount=1000");
 
         Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(), null).getBody();
         assertEquals("AWAITING_FUNDS", r.get("status"), String.valueOf(r));
@@ -645,13 +731,12 @@ class RefundFlowTests {
         assertEquals("INSUFFICIENT_PAYOUT_BALANCE", sent.getValue().reasonCode());
         assertEquals("a@example.com", sent.getValue().customerEmail());
 
-        // Job quét lại khi ví VẪN thiếu: nhánh thiếu tiền break chứ không submit lại, nên không có mail thứ hai.
         refundService.drainQueue();
         refundService.drainQueue();
         verify(mailer, times(1)).sendRefundAwaitingFunds(eq(email), any());
         verify(mailer, never()).sendRefundNeedsReview(any(), any());
 
-        post("/mock-gateway/balance?amount=" + original);                 // nạp ví -> chạy tiếp như thường
+        post("/mock-gateway/balance?amount=" + original);
         refundService.drainQueue();
         assertEquals("PROCESSING", refund(r.get("id")).get("status"));
         verify(mailer, times(1)).sendRefundAwaitingFunds(eq(email), any());
@@ -659,10 +744,6 @@ class RefundFlowTests {
         assertEquals(10, available(t));
     }
 
-    /**
-     * Chờ ví quá {@code app.refund.awaiting-funds-timeout} -> MANUAL_REVIEW: BTC nhận đúng một mail "xử lý tay",
-     * và vòng job kế tiếp không gửi lại (lệnh đã rời hàng chờ nên không còn được quét).
-     */
     @Test
     @SuppressWarnings("unchecked")
     void awaitingFundsTimeoutMailsOrganizerOnce() {
@@ -677,7 +758,6 @@ class RefundFlowTests {
         Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(), null).getBody();
         assertEquals("AWAITING_FUNDS", r.get("status"), String.valueOf(r));
 
-        // Lùi thời điểm vào hàng chờ về 48h trước để không phải chờ 24h thật
         jdbc.update("update refunds set queued_since = now() - interval '48 hours' where id = ?::uuid", r.get("id"));
 
         refundService.drainQueue();
@@ -686,19 +766,13 @@ class RefundFlowTests {
         verify(mailer).sendRefundNeedsReview(eq(email), sent.capture());
         assertEquals("AWAITING_FUNDS_TIMEOUT", sent.getValue().reasonCode());
 
-        refundService.drainQueue();                                       // vòng job kế tiếp
+        refundService.drainQueue();
         verify(mailer, times(1)).sendRefundNeedsReview(eq(email), any());
 
-        post("/mock-gateway/balance?amount=" + original);                 // trả ví về cho các test sau
+        post("/mock-gateway/balance?amount=" + original);
     }
 
-    /* ---------- email liên hệ của khách ---------- */
 
-    /**
-     * contactEmail là đường DUY NHẤT để báo cho khách khi BTC hủy yêu cầu hoàn vé, nên phải bắt buộc ngay ở API
-     * (cột DB nullable vì không backfill được cho row cũ — xem V7__refund_contact_email.sql).
-     * Thiếu hoặc sai định dạng thì 400 và KHÔNG được tạo refund nào, vé cũng không được đổi trạng thái.
-     */
     @Test
     void contactEmailIsRequiredAndMustLookLikeAnEmail() {
         Event e = event();
@@ -726,11 +800,6 @@ class RefundFlowTests {
         assertEquals(9, available(t));
     }
 
-    /**
-     * Email lưu ở dạng chuẩn hóa (trim + chữ thường). TẠI SAO quan trọng: "  Foo@BAR.com " và "foo@bar.com"
-     * là cùng một hộp thư, nhưng khoảng trắng đầu/cuối làm SMTP từ chối địa chỉ, còn chữ hoa thì làm mọi
-     * so khớp email sau này sai. Chuẩn hóa một lần lúc lưu là xong.
-     */
     @Test
     void contactEmailIsStoredTrimmedAndLowercased() {
         Event e = event();
@@ -745,7 +814,6 @@ class RefundFlowTests {
         assertEquals("foo@bar.com", stored);
     }
 
-    /* ---------- phải là chủ đơn mới hoàn được ---------- */
 
     @Test
     void guestCannotRequestRefund() {
@@ -762,7 +830,6 @@ class RefundFlowTests {
         assertEquals(0, refunds.findAllByOrderIdOrderByCreatedAt(UUID.fromString((String) order.get("id"))).size());
     }
 
-    /** Hoàn tiền là tiền RA: biết orderId thôi không đủ, phải đúng chủ đơn. 404 để không tiết lộ đơn tồn tại. */
     @Test
     void otherUserCannotRefundSomeoneElsesOrder() {
         Event e = event();
@@ -772,8 +839,6 @@ class RefundFlowTests {
 
         ResponseEntity<Map> res = anon().post().uri("/api/v1/orders/" + order.get("id") + "/refunds")
                 .headers(h -> { h.setBearerAuth(otherToken); h.set("Idempotency-Key", UUID.randomUUID().toString()); })
-                // contactEmail phải có: @Valid chạy TRƯỚC thân controller, thiếu field là 400 VALIDATION
-                // và ta sẽ không bao giờ kiểm được cái 404 mà test này muốn kiểm.
                 .body(Map.of("ticketIds", ticketIds(order), "contactEmail", CONTACT_EMAIL))
                 .retrieve().toEntity(Map.class);
 
@@ -784,17 +849,12 @@ class RefundFlowTests {
         ticketIds(order).forEach(id -> assertEquals("ACTIVE", ticketStatus(id), "vé của người ta không bị đổi trạng thái"));
     }
 
-    /* ---------- chọn ngân hàng ---------- */
 
-    /**
-     * PayOS có thể trả counterAccountBankId là mã CITAD 8 số (hoặc rỗng với ví điện tử). Chi hộ không dùng được
-     * mã đó, nên phải coi như KHÔNG BIẾT ngân hàng và bắt khách tự chọn — chứ không gửi lệnh chi vào mã rác.
-     */
     @Test
     void nonBinFromWebhookForcesBuyerToChooseBank() {
         Event e = event();
         TicketTier t = tier(e, 10, 200_000);
-        Map<?, ?> order = paidOrderWithPayerBank(e, t, "01201001");        // mã CITAD 8 số
+        Map<?, ?> order = paidOrderWithPayerBank(e, t, "01201001");
         assertNull(jdbc.queryForObject("select payer_bank_bin from payments where order_id = ?::uuid", String.class,
                 order.get("id")), "mã không đúng dạng BIN phải bị bỏ, không lưu vào payment");
 
@@ -803,7 +863,6 @@ class RefundFlowTests {
         assertEquals("PAYER_ACCOUNT_UNKNOWN", auto.getBody().get("code"));
         assertEquals("PAID", get("/api/v1/orders/" + order.get("id")).getBody().get("status"), "đơn chưa được đổi trạng thái");
 
-        // Khách chọn ngân hàng + nhập số tài khoản -> đi đường MANUAL_REVIEW
         Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(),
                 Map.of("bin", "970436", "accountNumber", "1234567891")).getBody();
         assertEquals("MANUAL_REVIEW", r.get("status"), String.valueOf(r));
@@ -814,9 +873,8 @@ class RefundFlowTests {
     void sameAccountWithChosenBankRunsAutomatically() {
         Event e = event();
         TicketTier t = tier(e, 10, 200_000);
-        Map<?, ?> order = paidOrderWithPayerBank(e, t, "01201001");        // PayOS trả mã CITAD, chỉ thiếu mã ngân hàng
+        Map<?, ?> order = paidOrderWithPayerBank(e, t, "01201001");
 
-        // Khách chọn ngân hàng cho ĐÚNG số tài khoản đã thanh toán -> tiền vẫn về chỗ cũ, không cần ai duyệt.
         Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(),
                 Map.of("bin", "970436", "accountNumber", "0123456789012")).getBody();
 
@@ -833,7 +891,7 @@ class RefundFlowTests {
     void emptyPayerBankFromWalletAlsoForcesChoice() {
         Event e = event();
         TicketTier t = tier(e, 10, 200_000);
-        Map<?, ?> order = paidOrderWithPayerBank(e, t, "");                // ví điện tử: không trả bank
+        Map<?, ?> order = paidOrderWithPayerBank(e, t, "");
 
         ResponseEntity<Map> auto = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(), null);
 
@@ -864,7 +922,6 @@ class RefundFlowTests {
         assertEquals("MB Bank", banks.get(0).get("name"));
     }
 
-    /* ---------- ví ---------- */
 
     @Test
     void walletSnapshotCountsCommittedAndLiability() {
@@ -900,12 +957,7 @@ class RefundFlowTests {
         assertEquals(RefundStatus.SUCCEEDED, refunds.findById(UUID.fromString((String) r.get("id"))).orElseThrow().getStatus());
     }
 
-    /* ---------- BTC hủy yêu cầu hoàn tiền (outcome=CANCELLED) ---------- */
 
-    /**
-     * Ca hay gặp nhất: ví chi cạn nên refund xếp hàng AWAITING_FUNDS, khách đồng ý thôi không hoàn nữa.
-     * Hủy phải trả vé về cho khách (ACTIVE) mà KHÔNG cộng kho — vé chưa từng nhả ra khỏi kho.
-     */
     @Test
     void organizerCancelsRefundWaitingForWalletTopUp() {
         String email = "btc-" + UUID.randomUUID() + "@example.com";
@@ -915,7 +967,7 @@ class RefundFlowTests {
         Map<?, ?> order = paidOrder(e, t, 1);
         List<String> ids = ticketIds(order);
         long original = ((Number) get("/mock-gateway/balance").getBody().get("balance")).longValue();
-        post("/mock-gateway/balance?amount=1000");                         // ví gần cạn -> vào hàng chờ
+        post("/mock-gateway/balance?amount=1000");
 
         Map<?, ?> r = requestRefund(order.get("id"), ids, UUID.randomUUID().toString(), null).getBody();
         assertEquals("AWAITING_FUNDS", r.get("status"), String.valueOf(r));
@@ -934,10 +986,9 @@ class RefundFlowTests {
                 "đơn về trạng thái xin hoàn lại được");
         assertEquals(9, available(t), "kho KHÔNG được cộng: vé chưa từng nhả ra");
 
-        post("/mock-gateway/balance?amount=" + original);                 // trả ví về cho các test sau
+        post("/mock-gateway/balance?amount=" + original);
     }
 
-    /** Hủy từ MANUAL_REVIEW (đích lạ chờ BTC duyệt) cho cùng một kết quả. */
     @Test
     void organizerCancelsRefundInManualReview() {
         Event e = event();
@@ -961,10 +1012,6 @@ class RefundFlowTests {
         assertEquals(9, available(t), "kho không tăng");
     }
 
-    /**
-     * Hai trạng thái KHÔNG được hủy vì tiền có thể đang đi: PROCESSING (provider đã nhận lệnh) và REQUESTED
-     * (submit() có thể đang gọi provider ngay lúc đó). Hủy ở đây là khách vừa giữ vé vừa nhận tiền.
-     */
     @Test
     void cancelIsRejectedWhileMoneyMayBeMoving() {
         Event e = event();
@@ -980,8 +1027,6 @@ class RefundFlowTests {
         assertEquals("REFUND_NOT_CANCELLABLE", processing.getCode());
         assertEquals(409, processing.getStatus().value());
 
-        // Cửa sổ REQUESTED chỉ mở trong lúc submit() đang gọi provider nên không dựng được qua API:
-        // lùi trạng thái bằng SQL, giống cách test hàng chờ lùi queued_since.
         jdbc.update("update refunds set status = 'REQUESTED', provider_refund_id = null where id = ?::uuid", refundId);
 
         DomainException requested = org.junit.jupiter.api.Assertions.assertThrows(DomainException.class,
@@ -991,10 +1036,6 @@ class RefundFlowTests {
         assertEquals(9, available(t));
     }
 
-    /**
-     * Cái bẫy chính: MANUAL_REVIEW do provider treo lệnh (hoặc PROCESSING_TIMEOUT) thì trạng thái nằm trong
-     * danh sách "hủy được" NHƯNG providerRefundId != null — lệnh có thể vẫn đang bay. Phải chặn, y như RETRY.
-     */
     @Test
     void cancelIsRejectedWhenProviderAlreadyHasTheOrder() {
         Event e = event();
@@ -1002,7 +1043,7 @@ class RefundFlowTests {
         Map<?, ?> order = paidOrder(e, t, 1);
         Map<?, ?> r = requestRefund(order.get("id"), ticketIds(order), UUID.randomUUID().toString(), null).getBody();
         UUID refundId = UUID.fromString((String) r.get("id"));
-        post("/mock-gateway/refunds/" + refundId + "/hold");              // provider treo -> MANUAL_REVIEW
+        post("/mock-gateway/refunds/" + refundId + "/hold");
         assertEquals("MANUAL_REVIEW", refund(refundId).get("status"));
         assertNotNull(refund(refundId).get("providerRefundId"));
 
@@ -1012,14 +1053,12 @@ class RefundFlowTests {
         assertEquals(409, ex.getStatus().value());
         assertEquals("MANUAL_REVIEW", refund(refundId).get("status"), "không được đổi gì");
 
-        // Đường đúng: tra dashboard PayOS rồi chốt theo sự thật
         refundService.resolve(refundId,
                 new ResolveRefundRequest(ResolveRefundRequest.Outcome.SUCCEEDED, "đã thấy tiền đi", null));
         assertEquals("SUCCEEDED", refund(refundId).get("status"));
         assertEquals(10, available(t));
     }
 
-    /** note là lý do hủy: thiếu (hoặc toàn khoảng trắng) thì 400, còn ba outcome cũ vẫn không cần note. */
     @Test
     void cancelWithoutNoteIsRejected() {
         String email = "btc-" + UUID.randomUUID() + "@example.com";
@@ -1039,12 +1078,10 @@ class RefundFlowTests {
         assertEquals(400, blank.getStatusCode().value(), String.valueOf(blank.getBody()));
         assertEquals("MANUAL_REVIEW", refund(refundId).get("status"), "refund không được đổi gì");
 
-        // FAILED không bắt buộc note: hành vi cũ giữ nguyên
         assertEquals(200, resolveAsOrganizer(btc, refundId, Map.of("outcome", "FAILED")).getStatusCode().value());
         assertEquals("ADMIN_REJECTED", refund(refundId).get("failureCode"));
     }
 
-    /** Bấm hủy hai lần: lần hai không đổi thêm gì (vé chỉ về ACTIVE một lần, kho không lệch). */
     @Test
     void cancellingTwiceChangesNothingMore() {
         Event e = event();
@@ -1069,7 +1106,6 @@ class RefundFlowTests {
         assertEquals(9, available(t), "kho không lệch");
     }
 
-    /** Hủy cũng là tiền/vé của sự kiện người ta: BTC khác phải nhận 404 và không đổi được gì. */
     @Test
     void otherOrganizerCannotCancelRefund() {
         String email = "btc-" + UUID.randomUUID() + "@example.com";
@@ -1091,10 +1127,6 @@ class RefundFlowTests {
         assertEquals("REFUND_PENDING", ticketStatus(ticketIds(order).get(0)));
     }
 
-    /**
-     * Điểm quan trọng nhất của hủy: phải MỞ LẠI đường hoàn tiền, không để vé kẹt. Hủy vì nhập sai số tài khoản
-     * rồi khách xin hoàn lại — lần này để trống destination nên tiền về đúng tài khoản đã trả, chạy tự động.
-     */
     @Test
     void customerCanRequestRefundAgainAfterCancel() {
         Event e = event();
@@ -1119,13 +1151,7 @@ class RefundFlowTests {
         assertEquals(10, available(t), "kho chỉ cộng khi tiền THẬT SỰ đi, và chỉ một lần");
     }
 
-    /* ---------- thông báo cho KHÁCH khi bị hủy yêu cầu hoàn vé ---------- */
 
-    /**
-     * BTC hủy -> khách nhận ĐÚNG MỘT mail, ở đúng email khách đã nhập lúc tạo yêu cầu (KHÔNG phải email lúc mua),
-     * với số tiền và số vé của chính yêu cầu đã hủy. Vỡ test này nghĩa là khách bị hủy mà không hay biết,
-     * hoặc mail bay tới hộp thư khác hộp thư khách chỉ định.
-     */
     @Test
     @SuppressWarnings("unchecked")
     void cancelMailsCustomerOnceAtTheEmailFromTheRequest() {
@@ -1133,9 +1159,8 @@ class RefundFlowTests {
         String btc = registerOrganizer(btcEmail);
         Event e = event(Instant.now().plusSeconds(10 * 86_400), organizerId(btcEmail));
         TicketTier t = tier(e, 10, 200_000);
-        Map<?, ?> order = paidOrder(e, t, 2);                             // 2 vé x 200k -> yêu cầu hoàn 400k
+        Map<?, ?> order = paidOrder(e, t, 2);
         List<String> ids = ticketIds(order);
-        // Đơn mua bằng a@example.com nhưng khách muốn nhận thông báo ở hộp thư khác -> mail phải đi tới đây.
         String customerEmail = "hop-thu-rieng-" + UUID.randomUUID() + "@example.com";
         Map<?, ?> r = requestRefund(order.get("id"), ids, UUID.randomUUID().toString(),
                 Map.of("bin", "970422", "accountNumber", "1234567891"), customerEmail).getBody();
@@ -1157,21 +1182,12 @@ class RefundFlowTests {
         assertEquals(2, sent.getValue().ticketCount());
         verify(mailer, never()).sendRefundCancelledToCustomer(eq("a@example.com"), any());
 
-        // Bấm hủy lần hai: 409 vì guard trạng thái chạy TRƯỚC handler (refund đã FAILED) -> không có mail thứ hai.
         assertEquals(409, resolveAsOrganizer(btc, refundId,
                 Map.of("outcome", "CANCELLED", "note", "hủy lần hai")).getStatusCode().value());
         verify(mailer, times(1)).sendRefundCancelledToCustomer(eq(customerEmail), any());
         assertEquals(8, available(t), "kho vẫn trừ 2 vé đã bán: hủy hoàn tiền KHÔNG cộng kho lại");
     }
 
-    /**
-     * Ca quan trọng nhất: SMTP chết thì việc HỦY vẫn phải thành công. Hủy là thao tác về vé/trạng thái đơn
-     * (vé về ACTIVE, refund về FAILED) và nó đã commit xong trước khi mail được gửi — để exception của mail
-     * bay ra là BTC nhận 500 cho một việc đã làm xong, rồi bấm lại và hoang mang vì thấy 409.
-     *
-     * <p>Có HAI lớp chắn cùng bắt RuntimeException: RefundNotifier tự bọc try/catch, và RefundService bọc
-     * thêm sendMailQuietly. Test này đi qua cả hai.
-     */
     @Test
     @SuppressWarnings("unchecked")
     void cancelStillSucceedsWhenSendingMailBlowsUp() {

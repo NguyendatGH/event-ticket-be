@@ -62,7 +62,6 @@ public class Organizer {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
-    /** Slug gốc từ tên BTC; trùng thì nơi gọi thêm hậu tố (Slugs.unique). */
     public static String slugify(String name) {
         return Slugs.slugify(name, "organizer");
     }

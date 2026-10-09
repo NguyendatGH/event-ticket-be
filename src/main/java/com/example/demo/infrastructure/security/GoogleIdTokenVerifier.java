@@ -15,21 +15,14 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 
-/**
- * Verify id_token Google trả cho FE. Payload chưa verify thì KHÔNG được tin — ai cũng bịa được JWT chứa email người khác.
- * Kiểm 4 thứ: chữ ký (public key ở {@link #JWKS_URI}), {@code aud} = client id của app, {@code iss} là Google, còn hạn.
- * Không cần client secret; secret chỉ dùng cho luồng redirect.
- */
 @Component
 public class GoogleIdTokenVerifier {
 
     private static final String JWKS_URI = "https://www.googleapis.com/oauth2/v3/certs";
     private static final List<String> ISSUERS = List.of("https://accounts.google.com", "accounts.google.com");
 
-    /** Thông tin lấy từ id_token sau khi đã verify. */
     public record GoogleAccount(String email, String fullName, String pictureUrl) {}
 
-    /** null khi chưa cấu hình GOOGLE_CLIENT_ID → tính năng tắt, không làm app chết lúc khởi động. */
     private final JwtDecoder decoder;
 
     public GoogleIdTokenVerifier(@Value("${app.auth.google.client-id:}") String clientId) {
@@ -45,13 +38,11 @@ public class GoogleIdTokenVerifier {
 
         Jwt jwt;
         try {
-            jwt = decoder.decode(idToken);   // sai chữ ký / hết hạn / sai aud đều ném JwtException
+            jwt = decoder.decode(idToken);
         } catch (JwtException e) {
             throw DomainException.unauthorized("GOOGLE_TOKEN_INVALID", "Token Google không hợp lệ hoặc đã hết hạn");
         }
 
-        // Google Workspace có thể trả email chưa xác minh; email chưa xác minh mà cho đăng nhập
-        // thì người khác đăng ký trùng email là chiếm được tài khoản.
         if (!Boolean.TRUE.equals(jwt.getClaimAsBoolean("email_verified"))) {
             throw DomainException.unauthorized("GOOGLE_EMAIL_NOT_VERIFIED", "Email Google này chưa được xác minh");
         }

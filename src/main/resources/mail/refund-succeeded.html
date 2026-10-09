@@ -1,0 +1,52 @@
+<!-- Mail báo KHÁCH rằng tiền hoàn vé đã được chuyển. Biến: customerName orderCode amount ticketCount destination orderUrl
+     (amount đã format sẵn trong Java; destination là tên ngân hàng + 4 số cuối tài khoản, KHÔNG bao giờ là số đầy đủ). -->
+<div style="margin:0;padding:24px 16px;background:#f4f5f7;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+  <div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:8px;padding:28px 24px;">
+
+    <h1 style="margin:0 0 16px;font-size:20px;line-height:1.4;color:#15803d;">
+      Đã hoàn tiền vé cho bạn
+    </h1>
+
+    <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">
+      Xin chào {{customerName}}, yêu cầu hoàn vé của bạn cho đơn <strong>{{orderCode}}</strong> đã
+      <strong>hoàn tất</strong>. Tiền đã được chuyển tới tài khoản bên dưới.
+    </p>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           style="width:100%;font-size:14px;line-height:1.6;background:#f9fafb;border-radius:6px;margin:0 0 20px;">
+      <tr>
+        <td style="padding:12px 14px;color:#6b7280;width:40%;">Mã đơn</td>
+        <td style="padding:12px 14px;font-weight:bold;">{{orderCode}}</td>
+      </tr>
+      <tr>
+        <td style="padding:12px 14px;color:#6b7280;">Số tiền hoàn</td>
+        <td style="padding:12px 14px;font-weight:bold;">{{amount}}</td>
+      </tr>
+      <tr>
+        <td style="padding:12px 14px;color:#6b7280;">Số vé đã hoàn</td>
+        <td style="padding:12px 14px;">{{ticketCount}}</td>
+      </tr>
+      <tr>
+        <td style="padding:12px 14px;color:#6b7280;">Chuyển tới</td>
+        <td style="padding:12px 14px;">{{destination}}</td>
+      </tr>
+    </table>
+
+    <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#4b5563;">
+      Các vé trong yêu cầu này không còn dùng để vào sự kiện được nữa. Thời gian tiền hiện trong tài khoản tùy
+      ngân hàng của bạn; nếu sau 1 ngày làm việc vẫn chưa thấy, hãy liên hệ ban tổ chức kèm mã đơn ở trên.
+    </p>
+
+    <p style="margin:0 0 20px;">
+      <a href="{{orderUrl}}"
+         style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-size:15px;font-weight:bold;padding:12px 24px;border-radius:6px;">
+        Xem đơn của tôi
+      </a>
+    </p>
+
+    <p style="margin:0;font-size:12px;line-height:1.6;color:#6b7280;word-break:break-all;">
+      Nút không bấm được? Dán link này vào trình duyệt:<br>{{orderUrl}}
+    </p>
+
+  </div>
+</div>

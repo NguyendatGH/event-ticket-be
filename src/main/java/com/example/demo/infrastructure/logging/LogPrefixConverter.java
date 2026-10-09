@@ -7,19 +7,25 @@ import com.example.demo.infrastructure.web.TraceIdFilter;
 
 import java.util.Map;
 
-/** {@code %logPrefix}: dựng {@code [BACKEND][PAYOS][orderCode=...][trace=...] } từ MDC, thiếu key nào bỏ đoạn đó. */
 public class LogPrefixConverter extends ClassicConverter {
 
     @Override
     public String convert(ILoggingEvent event) {
         Map<String, String> mdc = event.getMDCPropertyMap();
-        StringBuilder sb = new StringBuilder(64);
-        append(sb, "", mdc.get(LogContext.SOURCE));
-        append(sb, "", mdc.get(LogContext.PROVIDER));
-        append(sb, "orderCode=", mdc.get(LogContext.ORDER_CODE));
+        StringBuilder sb = new StringBuilder(128)
+                .append('[').append(value(mdc, LogContext.SOURCE, LogContext.BACKEND)).append(']')
+                .append('[').append(value(mdc, LogContext.MER_NO, "-"))
+                .append('-').append(value(mdc, LogContext.TER_NO, "-"))
+                .append('-').append(value(mdc, LogContext.TRADE_NO, "-"))
+                .append('-').append(value(mdc, LogContext.ORDER_NO, "-")).append(']');
         append(sb, "refundId=", mdc.get(LogContext.REFUND_ID));
         append(sb, "trace=", mdc.get(TraceIdFilter.MDC_KEY));
-        return sb.isEmpty() ? "" : sb.append(' ').toString();
+        return sb.append(' ').toString();
+    }
+
+    private static String value(Map<String, String> mdc, String key, String fallback) {
+        String value = mdc.get(key);
+        return value == null || value.isBlank() ? fallback : value;
     }
 
     private static void append(StringBuilder sb, String label, String value) {

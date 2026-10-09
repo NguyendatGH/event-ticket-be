@@ -16,6 +16,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
 import java.util.Map;
@@ -26,17 +28,13 @@ import java.util.stream.Collectors;
 import static com.example.demo.domain.payment.WebhookProcessingResult.IGNORED;
 import static com.example.demo.domain.payment.WebhookProcessingResult.PROCESSED;
 
-/**
- * Một cửa duy nhất chốt kết quả refund và hoàn kho (poll, webhook, admin resolve đều đổ vào đây).
- * Một transaction: khóa order → khóa refund → chuyển trạng thái có điều kiện. Lần thứ hai thấy refund đã terminal
- * thì IGNORED, nên kho không bao giờ cộng hai lần dù webhook trùng, poll trùng hay admin bấm hai lần.
- */
 @Component
 public class RefundResultHandler {
 
     private static final Logger log = LoggerFactory.getLogger(RefundResultHandler.class);
 
-    /** Refund chưa kết thúc: tiền vẫn có thể ra khỏi ví cho những cái này. */
+    private static final String CANCELLED_BY_ORGANIZER = "CANCELLED_BY_ORGANIZER";
+
     private static final List<RefundStatus> OPEN = List.of(RefundStatus.REQUESTED, RefundStatus.AWAITING_FUNDS,
             RefundStatus.PROCESSING, RefundStatus.MANUAL_REVIEW);
 
@@ -45,24 +43,27 @@ public class RefundResultHandler {
     private final TicketRepository tickets;
     private final InventoryRepository inventory;
     private final LedgerService ledger;
+    private final SellerWalletService sellerWallet;
+    private final BuyerWalletService buyerWallet;
+    private final RefundNotifier notifier;
 
     public RefundResultHandler(RefundRepository refunds, OrderRepository orders, TicketRepository tickets,
-                               InventoryRepository inventory, LedgerService ledger) {
+                               InventoryRepository inventory, LedgerService ledger, SellerWalletService sellerWallet,
+                               BuyerWalletService buyerWallet, RefundNotifier notifier) {
         this.refunds = refunds;
         this.orders = orders;
         this.tickets = tickets;
         this.inventory = inventory;
         this.ledger = ledger;
+        this.sellerWallet = sellerWallet;
+        this.buyerWallet = buyerWallet;
+        this.notifier = notifier;
     }
 
-    /**
-     * @param byAdmin true khi admin chốt MANUAL_REVIEW: bỏ qua điều kiện "đang PROCESSING",
-     *                nhưng vẫn KHÔNG đụng refund đã terminal.
-     */
     @Transactional
     public WebhookProcessingResult apply(UUID refundId, RefundStatusResult result, boolean byAdmin) {
         UUID orderId = refunds.findById(refundId).orElseThrow().getOrderId();
-        Order order = orders.findWithLockById(orderId).orElseThrow();   // khóa order trước, cùng thứ tự với RefundService.open()
+        Order order = orders.findWithLockById(orderId).orElseThrow();
         Refund refund = refunds.findWithLockById(refundId).orElseThrow();
 
         if (refund.isTerminal()) {
@@ -90,19 +91,25 @@ public class RefundResultHandler {
                 order.onRefundSucceeded(refund.getAmount(), remaining);
                 releaseInventory(items);
                 ledger.recordRefundSettled(refund);
+                sellerWallet.recordRefund(order, refund);
+                buyerWallet.recordRefund(order, refund);
                 assertNotOverRefunded(order);
                 log.info("Refund {} SUCCEEDED: {} vé, {} VND, order {} -> {}",
                         refundId, items.size(), refund.getAmount(), order.getOrderCode(), order.getStatus());
+                mailAfterCommit("SUCCEEDED_TO_CUSTOMER", refundId, () -> notifier.succeededToCustomer(refundId));
             }
             case FAILED, CANCELLED -> {
                 refund.fail(result.failureCode() != null ? result.failureCode() : result.status().name(), result.failureReason());
                 items.forEach(Ticket::restoreActive);
                 order.onRefundFailed();
                 log.warn("Refund {} FAILED ({}): vé về ACTIVE, kho giữ nguyên", refundId, refund.getFailureCode());
+                if (!CANCELLED_BY_ORGANIZER.equals(refund.getFailureCode()))
+                    mailAfterCommit("FAILED_TO_CUSTOMER", refundId, () -> notifier.failedToCustomer(refundId));
             }
             case ON_HOLD, REVERSED -> {
                 refund.manualReview(result.status().name(), result.failureReason());
                 log.warn("Refund {} {} ở provider: MANUAL_REVIEW", refundId, result.status());
+                mailAfterCommit("NEEDS_REVIEW", refundId, () -> notifier.needsReview(refundId));
             }
             case RECEIVED, PROCESSING -> {
                 return IGNORED;
@@ -111,14 +118,22 @@ public class RefundResultHandler {
         return PROCESSED;
     }
 
-    /**
-     * Không bao giờ hoàn quá số tiền đã thu. Số đã thu và đã hoàn lấy từ sổ ledger (bất biến), phần đang bay
-     * lấy từ bảng refunds (chưa chuyển tiền nên chưa vào sổ). Ném ra là rollback cả transaction — đúng ý:
-     * thà refund không chốt được còn hơn sổ sách sai.
-     */
+    private static void mailAfterCommit(String kind, UUID refundId, Runnable send) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    send.run();
+                } catch (RuntimeException ex) {
+                    log.warn("Không gửi được mail {} cho refund {}: {}", kind, refundId, ex.toString());
+                }
+            }
+        });
+    }
+
     private void assertNotOverRefunded(Order order) {
         long paidIn = ledger.customerLiabilityOf(order.getId());
-        if (paidIn <= 0) return;                   // chưa có bút toán thu: không có gì để so
+        if (paidIn <= 0) return;
         long refunded = ledger.refundedOf(order.getId());
         long inFlight = refunds.sumAmountByOrderIdAndStatusIn(order.getId(), OPEN);
         if (refunded + inFlight > paidIn) {
@@ -127,7 +142,6 @@ public class RefundResultHandler {
         }
     }
 
-    /** Cộng kho theo tier, khóa theo tier id tăng dần như CheckoutService để không deadlock chéo với checkout. */
     private void releaseInventory(List<Ticket> refunded) {
         Map<UUID, Long> byTier = refunded.stream()
                 .collect(Collectors.groupingBy(Ticket::getTicketTierId, TreeMap::new, Collectors.counting()));
