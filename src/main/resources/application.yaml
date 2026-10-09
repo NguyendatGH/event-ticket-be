@@ -50,15 +50,31 @@ spring:
 
 app:
   payos:
-    client-id: ${PAYOS_CLIENT_ID}
-    api-key: ${PAYOS_API_KEY}
-    checksum-key: ${PAYOS_CHECKSUM_KEY}
+    client-id: ${PAYOS_CLIENT_ID:}
+    api-key: ${PAYOS_API_KEY:}
+    checksum-key: ${PAYOS_CHECKSUM_KEY:}
     webhook-url: ${PAYOS_WEBHOOK_URL:}
     payout:
       client-id: ${PAYOS_PAYOUT_CLIENT_ID:}
       api-key: ${PAYOS_PAYOUT_API_KEY:}
       checksum-key: ${PAYOS_PAYOUT_CHECKSUM_KEY:}
       base-url: ${PAYOS_PAYOUT_BASE_URL:}
+  bank-simulate:
+    base-url: ${BANK_SIMULATE_URL:http://localhost:8090}
+    merchant-no: ${BANK_SIMULATE_MERCHANT_NO:MerNo000001}
+    terminal-id: ${BANK_SIMULATE_TERMINAL_ID:TerNo000001}
+    merchant-secret: ${BANK_SIMULATE_MERCHANT_SECRET:}
+    # Gateway báo kết quả thanh toán về đây (WebhookController, provider MOCK). Khai lúc onboard BTC;
+    # thiếu thì đơn chỉ được chốt khi PaymentReconcileJob quét lúc sắp hết hạn.
+    webhook-url: ${BANK_SIMULATE_WEBHOOK_URL:http://localhost:8080/webhooks/mock-gateway/payment}
+    # Admin key của gateway: chỉ dùng lúc onboard BTC (tạo merchant + terminal), không dùng khi thanh toán.
+    admin-key: ${BANK_SIMULATE_ADMIN_KEY:}
+    # Khoá AES mã hoá secret merchant của BTC trước khi lưu DB.
+    credential-key: ${BANK_SIMULATE_CREDENTIAL_KEY:}
+    onboarding:
+      acquirer-code: ${BANK_SIMULATE_ONBOARD_ACQUIRER:bank-a}
+      routing-profile: ${BANK_SIMULATE_ONBOARD_PROFILE:CARD_VIA_BANK_A}
+      currency: ${BANK_SIMULATE_ONBOARD_CURRENCY:VND}
   jwt:
     secret: ${JWT_SECRET}       
     access-token-ttl: 15m
@@ -90,6 +106,10 @@ app:
   payment:
     return-url: http://localhost:3000/checkout/return    
     cancel-url: http://localhost:3000/checkout/cancel
+    default-gateway: ${PAYMENT_DEFAULT_GATEWAY:PAYOS}
+  reconciliation:
+    # Đối soát sổ với ví. Chỉ đọc và log; lệch là có người phải xem.
+    interval: ${RECONCILIATION_INTERVAL:PT10M}
   refund:
     fee-percent: ${REFUND_FEE_PERCENT:0}  
     payout-enabled: ${REFUND_PAYOUT_ENABLED:true}  

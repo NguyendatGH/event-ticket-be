@@ -1,8 +1,10 @@
 package com.example.demo.infrastructure.web;
 
 import com.example.demo.application.AdminAuditService;
+import com.example.demo.application.ReconciliationService;
 import com.example.demo.application.WalletService;
 import com.example.demo.application.dto.OrderAudit;
+import com.example.demo.application.dto.ReconciliationReport;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -21,10 +23,22 @@ public class AdminController {
 
     private final AdminAuditService auditService;
     private final WalletService wallet;
+    private final ReconciliationService reconciliation;
 
-    public AdminController(AdminAuditService auditService, WalletService wallet) {
+    public AdminController(AdminAuditService auditService, WalletService wallet,
+                          ReconciliationService reconciliation) {
         this.auditService = auditService;
         this.wallet = wallet;
+        this.reconciliation = reconciliation;
+    }
+
+    @GetMapping("/reconciliation")
+    @Operation(summary = "Đối soát sổ với ví",
+            description = "Chỉ ĐỌC. ok=false là có lệch, phải xem ngay. Kiểm ba thứ: tổng nợ/có toàn sổ, "
+                    + "từng ref có tự cân, và mỗi ví có khớp log của chính nó (balance vs tổng tính lại vs "
+                    + "balance_after vs các cột total_*). Kèm số tiền đang nằm NGOÀI sổ (ví BTC + ví người mua).")
+    public ReconciliationReport reconciliation() {
+        return reconciliation.check();
     }
 
     @GetMapping("/orders/{id}/audit")

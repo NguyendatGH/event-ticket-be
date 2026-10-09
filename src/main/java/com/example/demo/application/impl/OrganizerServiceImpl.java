@@ -7,9 +7,11 @@ import com.example.demo.domain.common.DomainException;
 import com.example.demo.domain.common.Slugs;
 import com.example.demo.domain.event.EventStatus;
 import com.example.demo.domain.organizer.Organizer;
+import com.example.demo.domain.organizer.OrganizerCreated;
 import com.example.demo.infrastructure.persistence.EventRepository;
 import com.example.demo.infrastructure.persistence.OrganizerRepository;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -45,11 +47,14 @@ public class OrganizerServiceImpl implements OrganizerService {
     private final OrganizerRepository organizers;
     private final EventRepository events;
     private final JdbcClient jdbc;
+    private final ApplicationEventPublisher eventsBus;
 
-    public OrganizerServiceImpl(OrganizerRepository organizers, EventRepository events, JdbcClient jdbc) {
+    public OrganizerServiceImpl(OrganizerRepository organizers, EventRepository events, JdbcClient jdbc,
+                                ApplicationEventPublisher eventsBus) {
         this.organizers = organizers;
         this.events = events;
         this.jdbc = jdbc;
+        this.eventsBus = eventsBus;
     }
 
     @Override
@@ -59,7 +64,9 @@ public class OrganizerServiceImpl implements OrganizerService {
         String slug = Slugs.unique(Organizer.slugify(name), organizers::existsBySlug);
         Organizer o = Organizer.create(userId, slug, name);
         apply(o, req);
-        return organizers.save(o);
+        Organizer saved = organizers.save(o);
+        eventsBus.publishEvent(new OrganizerCreated(saved.getId()));
+        return saved;
     }
 
     @Override

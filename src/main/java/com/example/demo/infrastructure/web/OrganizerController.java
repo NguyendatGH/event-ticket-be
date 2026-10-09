@@ -2,9 +2,11 @@ package com.example.demo.infrastructure.web;
 
 import com.example.demo.application.AuthService;
 import com.example.demo.application.OrganizerService;
+import com.example.demo.application.PaymentMethodsService;
 import com.example.demo.application.dto.AuthResponse;
 import com.example.demo.application.dto.OrganizerProfileRequest;
 import com.example.demo.application.dto.OrganizerResponse;
+import com.example.demo.application.dto.PublicPaymentMethodsResponse;
 import com.example.demo.infrastructure.security.CurrentUser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirements;
@@ -22,6 +24,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -30,10 +33,13 @@ public class OrganizerController {
 
     private final OrganizerService organizerService;
     private final AuthService authService;
+    private final PaymentMethodsService paymentMethods;
 
-    public OrganizerController(OrganizerService organizerService, AuthService authService) {
+    public OrganizerController(OrganizerService organizerService, AuthService authService,
+                               PaymentMethodsService paymentMethods) {
         this.organizerService = organizerService;
         this.authService = authService;
+        this.paymentMethods = paymentMethods;
     }
 
     @PostMapping("/me/organizer")
@@ -68,5 +74,12 @@ public class OrganizerController {
     @Operation(summary = "Trang public của BTC", description = "Tìm theo slug hoặc id")
     public OrganizerResponse publicProfile(@PathVariable String idOrSlug) {
         return organizerService.publicProfile(idOrSlug);
+    }
+
+    @GetMapping("/organizers/{organizerId}/payment-methods")
+    @SecurityRequirements
+    @Operation(summary = "Phương thức thanh toán công khai của merchant")
+    public PublicPaymentMethodsResponse paymentMethods(@PathVariable UUID organizerId) {
+        return paymentMethods.publicMethods(organizerId);
     }
 }
