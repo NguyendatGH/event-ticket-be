@@ -167,6 +167,50 @@ class IdentityFlowTests {
     }
 
     @Test
+    void organizerSetsOnePayoutAccount() {
+        var registered = post("/api/v1/auth/register-organizer", null, Map.of(
+                "fullName", "Organizer Bank Test", "email", email(), "password", "password123",
+                "organizerName", "Bank Account Test " + UUID.randomUUID().toString().substring(0, 6)));
+        assertEquals(201, registered.getStatusCode().value(), String.valueOf(registered.getBody()));
+        String token = access(registered.getBody());
+        Object organizerId = ((Map<?, ?>) ((Map<?, ?>) registered.getBody().get("user")).get("organizer")).get("id");
+
+        var empty = call(HttpMethod.GET, "/api/v1/organizer/payout-account", token, null);
+        assertEquals(200, empty.getStatusCode().value());
+        assertNull(empty.getBody().get("bankBin"));
+        assertEquals(false, empty.getBody().get("payoutSynced"), "Chưa khai tài khoản thì chưa có gì để đồng bộ");
+
+        var missingBin = call(HttpMethod.PUT, "/api/v1/organizer/payout-account", token, Map.of(
+                "accountName", "NGUYEN VAN A", "accountNumber", "1234567890"));
+        assertEquals(400, missingBin.getStatusCode().value());
+        assertEquals("BANK_BIN_REQUIRED", code(missingBin));
+
+        var unknownBin = call(HttpMethod.PUT, "/api/v1/organizer/payout-account", token, Map.of(
+                "bankBin", "999999", "accountName", "NGUYEN VAN A", "accountNumber", "1234567890"));
+        assertEquals(400, unknownBin.getStatusCode().value(), String.valueOf(unknownBin.getBody()));
+        assertEquals("UNKNOWN_BANK_BIN", code(unknownBin), "Đúng 6 chữ số nhưng không có trong danh mục thì phải trượt");
+
+        var shortAccount = call(HttpMethod.PUT, "/api/v1/organizer/payout-account", token, Map.of(
+                "bankBin", "970436", "accountName", "NGUYEN VAN A", "accountNumber", "1234 5"));
+        assertEquals(400, shortAccount.getStatusCode().value(), String.valueOf(shortAccount.getBody()));
+        assertEquals("INVALID_ACCOUNT_NUMBER", code(shortAccount));
+
+        var first = call(HttpMethod.PUT, "/api/v1/organizer/payout-account", token, Map.of(
+                "bankBin", "970436", "accountName", "NGUYEN VAN A", "accountNumber", "1234567890"));
+        assertEquals(200, first.getStatusCode().value(), String.valueOf(first.getBody()));
+        assertEquals("Vietcombank", first.getBody().get("bankName"), "Tên ngân hàng lấy từ danh mục theo BIN");
+        assertEquals("******7890", first.getBody().get("maskedAccountNumber"));
+        assertNull(first.getBody().get("accountNumber"), "API không trả số tài khoản đầy đủ");
+
+        var changed = call(HttpMethod.PUT, "/api/v1/organizer/payout-account", token, Map.of(
+                "bankBin", "970407", "accountName", "NGUYEN VAN A", "accountNumber", "9876543210"));
+        assertEquals(200, changed.getStatusCode().value(), String.valueOf(changed.getBody()));
+        assertEquals("Techcombank", changed.getBody().get("bankName"));
+        assertEquals(1, jdbc.queryForObject("select count(*) from organizer_bank_accounts where organizer_id = ?::uuid",
+                Integer.class, organizerId.toString()), "Đổi tài khoản là sửa, không chồng thêm dòng");
+    }
+
+    @Test
     void publicOrganizerCountsPublishedEvents() {
         var res = call(HttpMethod.GET, "/api/v1/organizers/sunrise-live", null, null);
         assertEquals(200, res.getStatusCode().value());

@@ -7,7 +7,7 @@ Sơ đồ ERD + state machine + luồng xử lý: [`docs/ERD.md`](docs/ERD.md). 
 ## Chạy
 
 ```bash
-cp .env.example .env            # điền DB_*, JWT_SECRET (openssl rand -hex 32), PAYOS_*
+cp .env.example .env            # điền DB_*, JWT_SECRET (openssl rand -hex 32); thêm PAYOS_* nếu dùng PayOS
 docker compose up -d            # Postgres 16 ở 5432, bỏ qua nếu máy đã có Postgres
 
 set -a; . ./.env; set +a
@@ -15,7 +15,7 @@ set -a; . ./.env; set +a
 PGPASSWORD="$DB_PASSWORD" psql -h localhost -U "$DB_USERNAME" -d event-application-db \
   -1 -v ON_ERROR_STOP=1 -f db/seed-dev.sql    # dữ liệu mẫu, idempotent
 
-./mvnw spring-boot:run          # profile mặc định: dev. CẦN đủ PAYOS_* trong .env mới khởi động được
+./mvnw spring-boot:run          # profile mặc định: dev; gateway mặc định là PayOS
 ```
 
 - Swagger: http://localhost:8080/swagger-ui.html (không có dấu `/` cuối)
@@ -36,16 +36,28 @@ Base `/api/v1`, JSON, tiền là số nguyên VND, thời gian ISO-8601. Hợp �
 | Users | `GET /users` | chỉ ADMIN |
 | Events | `GET /events`, `/events/featured`, `/events/{idOrSlug}`, `/events/{idOrSlug}/related` | public |
 | Orders | `POST /orders` (header `Idempotency-Key`), `GET /orders/{id}`, `POST /orders/{id}/cancel` | **cần đăng nhập, chỉ chủ đơn** (sai chủ → 404); tạo đơn `PENDING_PAYMENT` + link thanh toán (`payment.checkoutUrl`), giữ kho, hết hạn sau `app.checkout.order-ttl`; provider không tạo được link → 502 `PAYMENT_LINK_FAILED`, đơn hủy, kho trả |
-| Webhooks | `POST /webhooks/payos/payment` | PayOS gọi; verify chữ ký (sai → 401, vẫn ghi `webhook_events`), chống trùng bằng unique `(provider, event_id)`, order `PAID` đúng một lần và cấp vé; luôn 200 kể cả `orderCode` lạ |
+| Webhooks | `POST /webhooks/payos/payment`, `POST /webhooks/mock-gateway/payment` | Provider gọi; verify chữ ký, chống trùng bằng unique `(provider, event_id)`, order `PAID` đúng một lần và cấp vé |
 | Refunds | `POST /orders/{id}/refunds` (header `Idempotency-Key`), `GET /orders/{id}/refunds`, `GET /refunds/{id}` | **cần đăng nhập, chỉ chủ đơn** (sai chủ → 404); hoàn theo vé, trả **202** vì tiền đi bất đồng bộ |
 | Admin | `GET /admin/orders/{id}/audit`, `GET /admin/refunds?status=`, `POST /admin/refunds/{id}/resolve`, `GET /admin/refunds/wallet` | chỉ ADMIN: audit đơn, hàng chờ duyệt, chốt refund `MANUAL_REVIEW`, ba con số của ví chi |
 | Dev | `POST /dev/seed` | chỉ profile dev; xóa event/order và seed lại từ JSON (tương đương `db/seed-dev.sql` sau khi truncate) |
 
 Trạng thái đơn sau thanh toán: `PAID` (đủ tiền khi còn hạn), `MANUAL_REVIEW` (tiền vào sau khi `EXPIRED`/`CANCELLED`, kho đã trả nên không cấp vé), còn `UNDERPAID`/`FAILED` nằm ở `payment.status` và đơn vẫn `PENDING_PAYMENT` tới khi hết hạn. `OrderExpiryJob` (60s) hỏi provider một lần trước khi hết hạn, `PaymentReconcileJob` (5 phút) đối chiếu đơn sắp hết hạn phòng webhook rớt.
 
-Thanh toán đi qua port `PaymentGatewayPort` trong domain, adapter duy nhất là PayOS thật (`infrastructure/gateway/payos`, mục dưới).
+Thanh toán đi qua port `PaymentGatewayPort` trong domain. Merchant chọn gateway và các phương thức được phép tại `GET/PUT /api/v1/organizer/payment-settings`; checkout public đọc cấu hình qua `GET /api/v1/organizers/{organizerId}/payment-methods`. Các gateway/phương thức thực tế phải được enable trong runtime tương ứng.
 Test dùng test double `MockPaymentGateway` ở `src/test/java/com/example/demo/support` (`@Profile("test")`).
-Refund **đã làm** (2026-09-29): hoàn theo vé bằng lệnh chi qua kênh payout PayOS, mục "Hoàn tiền" dưới.
+Refund **đã làm** (2026-09-29): hoàn theo vé qua adapter của gateway đã dùng cho payment, mục "Hoàn tiền" dưới.
+
+Chạy local không cần PayOS bằng profile `banksim`: `backend/bankSimulate` nhận payment/refund rồi BE vẫn giữ toàn bộ order, webhook và refund business logic. FE không đổi API; nó vẫn gọi BE `/api/v1` và chỉ redirect tới `checkoutUrl` do BankSim trả về. Khi chạy BankSim, đặt `PAYMENT_DEFAULT_GATEWAY=BANKSIM` (hoặc lưu BANKSIM trong giao diện Cổng thanh toán của merchant).
+
+```bash
+SPRING_PROFILES_ACTIVE=dev,banksim \
+PAYMENT_DEFAULT_GATEWAY=BANKSIM \
+BANK_SIMULATE_URL=http://localhost:8090 \
+BANK_SIMULATE_MERCHANT_NO=MER000001 \
+BANK_SIMULATE_TERMINAL_ID=GT000001 \
+BANK_SIMULATE_MERCHANT_SECRET='<secret-from-bankSim-create>' \
+./mvnw spring-boot:run
+```
 
 ## Đăng nhập Google
 
@@ -98,8 +110,7 @@ Refund có bộ test riêng: `./mvnw test -Dtest=RefundFlowTests` (15 test).
 
 Adapter `infrastructure/gateway/payos/PayOsPaymentGateway` (`@Profile("!test")`, tức luôn bật khi chạy app) dùng SDK chính thức `vn.payos:payos-java` 2.0.1: tạo link (`paymentRequests().create`), đọc trạng thái (`get`), hủy link (`cancel`), verify chữ ký webhook (`webhooks().verify`) và đăng ký webhook URL (`webhooks().confirm`).
 
-Không cần profile riêng nữa — PayOS là cổng duy nhất. Thiếu key trong `.env` là app **không khởi động được**
-(`app.payos.*` trong `application.yaml` khai `${PAYOS_CLIENT_ID}` không có default): đó là chủ ý, vì không còn cổng nào chạy thay.
+PayOS và BankSim được đăng ký song song khi chạy app. Thiếu key PayOS không ngăn app khởi động; chỉ khi merchant chọn PayOS mà chưa cấu hình đủ key thì tạo payment sẽ lỗi. Gateway mặc định được chọn bằng `PAYMENT_DEFAULT_GATEWAY` hoặc cấu hình trong giao diện merchant.
 
 ```bash
 # .env cần: PAYOS_CLIENT_ID, PAYOS_API_KEY, PAYOS_CHECKSUM_KEY (lấy ở https://my.payos.vn)
@@ -143,6 +154,18 @@ Muốn chi tiền thật cần thêm trên dashboard PayOS: bật kênh chi hộ
 
 Config: `app.refund.*` trong `application.yaml` (`fee-percent` phí hủy, `payout-enabled` kill switch,
 `processing-timeout`, `awaiting-funds-timeout`, `merchant-bin`/`merchant-account` chặn hoàn vòng về tài khoản thu).
+
+## Ví seller mô phỏng
+
+Khu vực `/organizer/wallet` là ví ảo riêng theo từng ban tổ chức, không dùng chung với `PAYOUT_WALLET` của
+provider. BTC có thể nạp tiền mô phỏng bằng `POST /api/v1/organizer/wallet/top-ups` với body
+`{"amount":500000,"note":"seed demo"}` và xem số dư/lịch sử qua `GET /api/v1/organizer/wallet`.
+
+- Order `PAID`: cộng doanh thu ròng (tiền thanh toán trừ phí sàn).
+- Payment thất bại, thiếu tiền, expired hoặc cancelled: không đổi ví seller.
+- Refund `SUCCEEDED`: trừ số tiền refund; refund `FAILED`, `CANCELLED`, `PROCESSING` hoặc `MANUAL_REVIEW`: chưa trừ.
+- Mỗi payment/refund chỉ tạo một transaction ví dù webhook/poll được gửi lại; số dư được phép âm để mô phỏng
+  trường hợp seller đã phát sinh nghĩa vụ refund nhưng chưa nạp đủ tiền.
 
 **Hiểu và tự sửa được: `../context/docs/spec-plan/huong-dan-refund.md`** — mô hình tư duy, thứ tự đọc code,
 7 bước xây lại, và 5 cái bẫy làm mất tiền kèm chỗ code chặn nó.

@@ -7,6 +7,7 @@ import com.example.demo.domain.idempotency.IdempotencyScope;
 import com.example.demo.infrastructure.persistence.IdempotencyRecordRepository;
 import com.example.demo.infrastructure.security.OpaqueTokens;
 import org.springframework.http.HttpStatus;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
@@ -39,8 +40,18 @@ public class IdempotencyServiceImpl implements IdempotencyService {
             }
             return json.readValue(existing.get().getResponseBody(), responseType);
         }
-        T response = action.get();
-        records.save(new IdempotencyRecord(scope, key, hash, HttpStatus.CREATED.value(), json.writeValueAsString(response)));
-        return response;
+        try {
+            T response = action.get();
+            records.save(new IdempotencyRecord(scope, key, hash, HttpStatus.CREATED.value(), json.writeValueAsString(response)));
+            return response;
+        } catch (DataIntegrityViolationException race) {
+            Optional<IdempotencyRecord> winner = records.findByScopeAndIdemKey(scope, key);
+            if (winner.isEmpty()) throw race;
+            if (!winner.get().getRequestHash().equals(hash)) {
+                throw new DomainException(HttpStatus.UNPROCESSABLE_ENTITY, "IDEMPOTENCY_KEY_REUSED",
+                        "Idempotency-Key này đã dùng cho một request khác");
+            }
+            return json.readValue(winner.get().getResponseBody(), responseType);
+        }
     }
 }

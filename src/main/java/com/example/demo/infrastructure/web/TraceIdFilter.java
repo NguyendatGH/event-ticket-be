@@ -1,5 +1,6 @@
 package com.example.demo.infrastructure.web;
 
+import com.example.demo.domain.common.LogContext;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -33,6 +34,7 @@ public class TraceIdFilter extends OncePerRequestFilter {
             chain.doFilter(req, res);
         } finally {
             MDC.remove(MDC_KEY);
+            LogContext.clear();
         }
     }
 }
