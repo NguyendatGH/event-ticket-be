@@ -80,7 +80,7 @@ public class PaymentServiceImpl implements PaymentService {
                 tx.executeWithoutResult(s -> webhookEvents.save(WebhookEvent.rejected(provider, audit.jsonOrWrapped(rawBody))));
                 throw ex;
             }
-            LogContext.orderCode(event.orderCode());   // chỉ biết orderCode sau khi parse được payload
+            LogContext.orderCode(event.orderCode());
             return record(provider, "payment", event);
         }
     }
@@ -113,13 +113,13 @@ public class PaymentServiceImpl implements PaymentService {
             result = IGNORED;
         } else if (order.getStatus() == OrderStatus.PAID) {
             log.info("[+] Trạng thái đơn hàng : PAID ");
-            result = IGNORED;                                              // đã PAID, gửi lại không đổi gì
+            result = IGNORED;
         } else if (!e.success()) {
             if (order.isPending() && payment.isAwaitingMoney()) {
-                payment.markFailed(e);                                     // khách có thể trả lại trên cùng link tới khi hết hạn
+                payment.markFailed(e);
                 result = PROCESSED;
             } else {
-                result = IGNORED;                                          // không ghi đè UNDERPAID/PAID_LATE/EXPIRED
+                result = IGNORED;
             }
         } else if (order.isPending()) {
             if (e.amount() < order.getTotalAmount()) {
@@ -146,7 +146,6 @@ public class PaymentServiceImpl implements PaymentService {
         return result;
     }
 
-    /** OrderExpiryJob: hỏi provider một lần rồi mới hết hạn. Trả PAID / EXPIRED / SKIPPED. */
     @Override
     public String settleExpired(UUID orderId) {
         Order order = orders.findById(orderId).orElse(null);
@@ -160,7 +159,6 @@ public class PaymentServiceImpl implements PaymentService {
         }
     }
 
-    /** PaymentReconcileJob: đơn sắp hết hạn, đối chiếu với provider phòng webhook rớt. */
     @Override
     public boolean reconcile(UUID orderId) {
         Order order = orders.findById(orderId).orElse(null);
@@ -174,7 +172,7 @@ public class PaymentServiceImpl implements PaymentService {
     public OrderResponse cancelOrder(UUID userId, UUID orderId) {
         Order order = orders.findById(orderId)
                 .orElseThrow(() -> DomainException.notFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng"));
-        order.requireOwner(userId);          // kiểm quyền trước khi gọi ra provider
+        order.requireOwner(userId);
         try (LogContext.Scope ignored = LogContext.order(gateway.provider().name(), order.getOrderCode())) {
             if (order.isPending() && reconcile(orderId)) {
                 log.warn("Order {} bấm hủy nhưng provider báo đã thanh toán: giữ đơn, đã cấp vé", order.getOrderCode());

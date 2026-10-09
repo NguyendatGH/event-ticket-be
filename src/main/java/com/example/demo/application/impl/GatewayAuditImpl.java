@@ -37,7 +37,6 @@ public class GatewayAuditImpl implements GatewayAudit {
         return o instanceof String s ? jsonOrWrapped(s) : json.writeValueAsString(o);
     }
 
-    /** Cột jsonb không nhận text thường: body lạ (webhook sai chữ ký) được bọc thành {"text": ...}. */
     @Override
     public String jsonOrWrapped(String raw) {
         try {

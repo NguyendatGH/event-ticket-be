@@ -13,10 +13,6 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * Gọi PayOS thật (chỉ tạo/đọc/hủy link, không có tiền chuyển). Tắt mặc định, bật bằng:
- *   set -a; . ./.env; set +a; PAYOS_LIVE=true ./mvnw -q test -Dtest=PayOsLiveSmokeTest
- */
 @EnabledIfEnvironmentVariable(named = "PAYOS_LIVE", matches = "true")
 class PayOsLiveSmokeTest {
 

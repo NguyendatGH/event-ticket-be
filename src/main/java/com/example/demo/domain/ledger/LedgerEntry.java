@@ -13,12 +13,6 @@ import lombok.NoArgsConstructor;
 import java.time.Instant;
 import java.util.UUID;
 
-/**
- * Một vế của bút toán. CHỈ THÊM, không sửa không xóa: đây là bản ghi bất biến của tiền đã thực sự di chuyển,
- * khác với các cột tổng trên orders/refunds (sửa được). Không FK để ghi được cả khi nghiệp vụ rollback.
- *
- * <p>Lệnh hoàn đang bay KHÔNG vào sổ — chưa chuyển tiền thì chưa phải bút toán; phần đó đếm từ bảng refunds.
- */
 @Entity
 @Table(name = "ledger_entries")
 @Getter

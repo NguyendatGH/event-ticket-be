@@ -5,15 +5,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * BIN Napas của ngân hàng VN, dùng làm đích lệnh chi. Phải kiểm vì {@code counterAccountBankId} trong webhook PayOS
- * có khi là mã CITAD 8 số hoặc rỗng (khách trả bằng ví) — API chi hộ từ chối cả hai, mà đoán BIN là có ngày
- * chuyển tiền cho người lạ. Sai dạng thì coi như KHÔNG BIẾT ngân hàng, bắt khách tự chọn.
- * Thứ tự trong map = thứ tự dropdown.
- */
 public final class BankBins {
 
-    /** Một ngân hàng cho FE dựng dropdown chọn ngân hàng. */
     public record Bank(String bin, String name) {}
 
     private static final Map<String, String> NAMES = names();
@@ -22,25 +15,21 @@ public final class BankBins {
     private BankBins() {
     }
 
-    /** BIN Napas là đúng 6 chữ số. Mã CITAD 8 số, mã rỗng, chữ cái đều trượt. */
     public static boolean isBin(String value) {
         return value != null && value.trim().matches("\\d{6}");
     }
 
-    /** Tên ngân hàng để hiển thị; BIN lạ thì trả về chính nó. null/rỗng trả null. */
     public static String nameOf(String bin) {
         if (bin == null || bin.isBlank()) return null;
         return NAMES.getOrDefault(bin.trim(), bin.trim());
     }
 
-    /** Danh sách cho FE, phổ biến trước. */
     public static List<Bank> all() {
         return ALL;
     }
 
     private static Map<String, String> names() {
         Map<String, String> m = new LinkedHashMap<>();
-        // phổ biến nhất, lên đầu dropdown
         m.put("970422", "MB Bank");
         m.put("970436", "Vietcombank");
         m.put("970415", "VietinBank");
@@ -51,7 +40,6 @@ public final class BankBins {
         m.put("970423", "TPBank");
         m.put("970405", "Agribank");
         m.put("970403", "Sacombank");
-        // còn lại, theo BIN
         m.put("970400", "Saigonbank");
         m.put("970406", "DongA Bank");
         m.put("970408", "GPBank");

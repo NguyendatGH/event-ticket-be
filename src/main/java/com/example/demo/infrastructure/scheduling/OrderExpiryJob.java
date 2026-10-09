@@ -14,10 +14,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * Mỗi phút, order PENDING_PAYMENT quá expires_at → hỏi provider một lần;
- * chưa trả thì EXPIRED + trả kho + hủy link; đã trả thì xử lý như webhook.
- */
 @Component
 public class OrderExpiryJob {
 
@@ -31,7 +27,6 @@ public class OrderExpiryJob {
         this.payments = payments;
     }
 
-    // GIỚI HẠN: không ShedLock, giả định một instance; nhiều instance thì thêm ShedLock hoặc cờ DB
     @Scheduled(fixedDelayString = "PT60S")
     public void run() {
         MDC.put("trace_id", UUID.randomUUID().toString());

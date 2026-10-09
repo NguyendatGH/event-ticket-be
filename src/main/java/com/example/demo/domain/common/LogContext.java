@@ -4,10 +4,6 @@ import org.slf4j.MDC;
 
 import java.util.UUID;
 
-/**
- * Ngữ cảnh log ở đầu message: {@code [BACKEND][PAYOS][orderCode=...]}. Mở bằng try-with-resources.
- * Đóng scope trả MDC về giá trị TRƯỚC ĐÓ chứ không xóa trắng, nên scope lồng nhau không mất ngữ cảnh bên ngoài.
- */
 public final class LogContext {
 
     public static final String SOURCE = "source";
@@ -38,7 +34,6 @@ public final class LogContext {
         return open(provider, null, refundId.toString());
     }
 
-    /** Bổ sung giá trị chỉ biết sau khi scope đã mở. */
     public static void orderCode(long orderCode) {
         put(ORDER_CODE, String.valueOf(orderCode));
     }

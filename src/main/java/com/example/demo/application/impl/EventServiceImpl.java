@@ -37,11 +37,6 @@ import static com.example.demo.application.support.Texts.blankToNull;
 import static com.example.demo.application.support.Texts.likePattern;
 import static com.example.demo.application.support.Texts.parseUuid;
 
-/**
- * API đọc sự kiện công khai (EventController). "Liệt kê" = PUBLISHED/UPCOMING và chưa qua
- * {@code coalesce(ends_at, starts_at)} trừ khi includePast; DRAFT → 404.
- * Đọc danh sách 2 bước: SQL lọc/sắp/phân trang chỉ lấy id, rồi {@link #summaries} nạp theo lô (4 query, không N+1).
- */
 @Service
 @Transactional(readOnly = true)
 public class EventServiceImpl implements EventService {
@@ -102,7 +97,6 @@ public class EventServiceImpl implements EventService {
         return summaries(ids(w, BY_DATE, Math.clamp(limit, 1, MAX_UPCOMING), 0));
     }
 
-    /** GET /events/facets: đếm theo danh mục, theo thành phố và khoảng giá của mọi sự kiện đang liệt kê. */
     @Override
     public EventFacets facets() {
         SqlWhere w = listed(false);
@@ -123,7 +117,6 @@ public class EventServiceImpl implements EventService {
         return new EventFacets(categories, cities, price);
     }
 
-    /** GET /events/{idOrSlug}: chi tiết kèm tiers (số vé còn lại) và BTC (kèm số sự kiện đang liệt kê). */
     @Override
     public EventResponse get(String idOrSlug) {
         Event e = find(idOrSlug);
@@ -134,7 +127,6 @@ public class EventServiceImpl implements EventService {
         return EventResponse.of(e, eventTiers, availableByTier(eventTiers), organizer, true);
     }
 
-    /** GET /events/{idOrSlug}/related: cùng danh mục, trừ chính nó. */
     @Override
     public List<EventResponse> related(String idOrSlug, int limit) {
         Event e = find(idOrSlug);
@@ -145,7 +137,6 @@ public class EventServiceImpl implements EventService {
         return summaries(ids(w, BY_DATE, Math.clamp(limit, 1, MAX_RELATED), 0));
     }
 
-    /** GET /events/{idOrSlug}/more-from-organizer: sự kiện khác của cùng BTC. */
     @Override
     public List<EventResponse> moreFromOrganizer(String idOrSlug, int limit) {
         Event e = find(idOrSlug);
@@ -156,7 +147,6 @@ public class EventServiceImpl implements EventService {
         return summaries(ids(w, BY_DATE, Math.clamp(limit, 1, MAX_RELATED), 0));
     }
 
-    /** GET /organizers/{idOrSlug}/events: upcoming (mặc định, gần nhất trước) hoặc past (mới diễn ra trước). */
     @Override
     public PageResponse<EventResponse> byOrganizer(String idOrSlug, String scope, int page, int size) {
         Organizer o = parseUuid(idOrSlug).flatMap(organizers::findById).or(() -> organizers.findBySlug(idOrSlug))
@@ -174,7 +164,6 @@ public class EventServiceImpl implements EventService {
         return page(w, BY_DATE, page, size);
     }
 
-    /** Nhận UUID hoặc slug (FE dùng slug trên URL). DRAFT coi như không tồn tại với public. */
     @Override
     public Event find(String idOrSlug) {
         return parseUuid(idOrSlug).flatMap(events::findById).or(() -> events.findBySlug(idOrSlug))
@@ -182,20 +171,17 @@ public class EventServiceImpl implements EventService {
                 .orElseThrow(() -> DomainException.notFound("EVENT_NOT_FOUND", "Không tìm thấy sự kiện " + idOrSlug));
     }
 
-    /** Bảng chung cho mọi query: p = giá thấp nhất mỗi sự kiện (lọc/sắp theo giá), o = BTC (tìm theo tên, lọc theo slug). */
     private static final String FROM = """
              from events e
              left join organizers o on o.id = e.organizer_id
              left join (select event_id, min(price) as min_price from ticket_tiers group by event_id) p on p.event_id = e.id
             """;
 
-    /** Chỉ join khi sort=popular: s.sold = số vé đã phát của sự kiện. */
     private static final String POPULAR_JOIN = """
              left join (select tt.event_id, count(*) as sold from tickets t
                         join ticket_tiers tt on tt.id = t.ticket_tier_id group by tt.event_id) s on s.event_id = e.id
             """;
 
-    /** Điều kiện "đang liệt kê" (cùng nghĩa EventStatus.isListed), thêm "chưa kết thúc" nếu không lấy sự kiện đã qua. */
     private static SqlWhere listed(boolean includePast) {
         SqlWhere w = new SqlWhere().add("e.status in ('PUBLISHED', 'UPCOMING')");
         if (!includePast) w.add("coalesce(e.ends_at, e.starts_at) >= now()");
@@ -220,7 +206,6 @@ public class EventServiceImpl implements EventService {
         return Pages.response(content, p, s, total);
     }
 
-    /** Tham số sort → ORDER BY. Chỉ trả chuỗi hằng trong code, không nối input của người dùng vào SQL. */
     private static String orderBy(String sort) {
         return switch (sort == null ? "date" : sort) {
             case "date" -> BY_DATE;
@@ -233,23 +218,18 @@ public class EventServiceImpl implements EventService {
         };
     }
 
-    /**
-     * from/to (ngày VN, gồm cả hai đầu) và when giao nhau thành một khoảng. Sự kiện được lấy khi thời gian diễn ra
-     * [starts_at, coalesce(ends_at, starts_at)] chạm khoảng đó, nên lễ hội nhiều ngày đang diễn ra vẫn tính là "hôm nay".
-     */
     private static void addDateFilter(SqlWhere w, LocalDate from, LocalDate to, String when) {
         LocalDate first = from;
         LocalDate last = to;
         if (when != null) {
             EventDateRange range = EventDateRange.ofWhen(when, LocalDate.now(VietnamTime.ZONE));
             if (range == null) throw DomainException.invalid("when", "when phải là today, weekend, week hoặc month");
-            // Giao hai khoảng: đầu muộn hơn, cuối sớm hơn
             if (first == null || range.from().isAfter(first)) first = range.from();
             if (last == null || range.to().isBefore(last)) last = range.to();
         }
         if (first != null) w.add("coalesce(e.ends_at, e.starts_at) >= :dateFrom", "dateFrom", startOfDay(first));
         if (last != null) {
-            w.add("e.starts_at < :dateTo", "dateTo", startOfDay(last.plusDays(1)));   // < 00:00 ngày hôm sau
+            w.add("e.starts_at < :dateTo", "dateTo", startOfDay(last.plusDays(1)));
         }
     }
 
@@ -257,12 +237,11 @@ public class EventServiceImpl implements EventService {
         return Timestamp.from(day.atStartOfDay(VietnamTime.ZONE).toInstant());
     }
 
-    /** Bốn query cho cả danh sách thay vì N+1: events theo id, tiers theo event, inventory theo tier, organizers theo id. */
     private List<EventResponse> summaries(List<UUID> ids) {
         if (ids.isEmpty()) return List.of();
         Map<UUID, Event> byId = events.findAllById(ids).stream()
                 .collect(Collectors.toMap(Event::getId, Function.identity()));
-        List<Event> list = ids.stream().map(byId::get).filter(Objects::nonNull).toList();   // giữ đúng thứ tự của SQL
+        List<Event> list = ids.stream().map(byId::get).filter(Objects::nonNull).toList();
         Map<UUID, List<TicketTier>> tiersByEvent = tiers.findAllByEventIdIn(ids).stream()
                 .collect(Collectors.groupingBy(TicketTier::getEventId));
         Map<UUID, Integer> available = availableByTier(tiersByEvent.values().stream().flatMap(List::stream).toList());

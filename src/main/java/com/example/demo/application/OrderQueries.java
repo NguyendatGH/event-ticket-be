@@ -8,10 +8,8 @@ import java.util.UUID;
 
 public interface OrderQueries {
 
-    /** Không kiểm chủ đơn: chỉ dùng nội bộ (admin audit, job, giả lập provider trong test). */
     OrderResponse get(UUID orderId);
 
-    /** Dùng cho endpoint của người mua: không phải chủ đơn -> 404. */
     OrderResponse getOwned(UUID userId, UUID orderId);
 
     PageResponse<OrderResponse> myOrders(UUID userId, String status, int page, int size);

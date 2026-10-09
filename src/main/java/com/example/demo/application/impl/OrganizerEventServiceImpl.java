@@ -35,17 +35,10 @@ import java.util.stream.Collectors;
 
 import static com.example.demo.application.support.Texts.blankToNull;
 
-/**
- * Phần GHI của sự kiện phía BTC (OrganizerEventController); phần đọc ở OrganizerEventQueries.
- * Không có hồ sơ BTC → 404 ORGANIZER_NOT_FOUND; sự kiện của BTC khác → 404 EVENT_NOT_FOUND.
- * Tránh deadlock: khóa dòng event trước, rồi inventory theo tier id tăng dần — checkout cũng khóa inventory
- * theo id tăng dần nên không thành vòng chờ.
- */
 @Service
 @Transactional
 public class OrganizerEventServiceImpl implements OrganizerEventService {
 
-    /** Số vé tối đa mỗi đơn khi BTC không nhập. */
     private static final int DEFAULT_MAX_PER_ORDER = 6;
 
     private final EventRepository events;
@@ -65,7 +58,6 @@ public class OrganizerEventServiceImpl implements OrganizerEventService {
         this.jdbc = jdbc;
     }
 
-    /** POST /organizer/events: tạo nháp. Chỉ bắt buộc name; field có mặt thì phải hợp lệ. */
     @Override
     public OrganizerEventDetail create(UUID userId, EventUpsertRequest req) {
         UUID organizerId = access.currentOrganizer(userId).getId();
@@ -79,13 +71,8 @@ public class OrganizerEventServiceImpl implements OrganizerEventService {
         return queries.detail(e);
     }
 
-    /**
-     * PUT /organizer/events/{id}. DRAFT sửa tự do. Đã publish: thêm tier được, tổng số vé không dưới sold + reserved,
-     * đổi giá khi chưa bán/giữ vé, không xóa tier đã có đơn, sau khi sửa vẫn phải đủ điều kiện publish. ENDED/CANCELLED → 409.
-     */
     @Override
     public OrganizerEventDetail update(UUID userId, UUID eventId, EventUpsertRequest req) {
-        // Khóa event trước khi đọc tier: không khóa thì hai PUT song song cùng tính delta kho từ totalQuantity cũ → available > total
         Event e = access.ownEventLocked(userId, eventId);
         Instant now = Instant.now();
         e.ensureEditable(now);
@@ -102,7 +89,6 @@ public class OrganizerEventServiceImpl implements OrganizerEventService {
         return queries.detail(e);
     }
 
-    /** POST /organizer/events/{id}/publish: 400 EVENT_INCOMPLETE kèm errors[], 409 EVENT_NOT_DRAFT. */
     @Override
     public OrganizerEventDetail publish(UUID userId, UUID eventId) {
         Event e = access.ownEventLocked(userId, eventId);
@@ -111,7 +97,6 @@ public class OrganizerEventServiceImpl implements OrganizerEventService {
         return queries.detail(e);
     }
 
-    /** DELETE /organizer/events/{id}: chỉ nháp chưa có đơn. Xóa theo thứ tự khóa ngoại: inventory → tiers → event. */
     @Override
     public void delete(UUID userId, UUID eventId) {
         Event e = access.ownEvent(userId, eventId);
@@ -136,10 +121,6 @@ public class OrganizerEventServiceImpl implements OrganizerEventService {
         inventory.save(new Inventory(tier.getId(), total));
     }
 
-    /**
-     * Đồng bộ tập tier FE gửi lên: có id = sửa, không id = thêm, vắng mặt = xóa.
-     * Khóa inventory tier cũ theo id tăng dần (cùng thứ tự checkout, tránh deadlock); đã bán + đang giữ = total − available.
-     */
     private void syncTiers(Event e, List<TierInput> inputs) {
         Map<UUID, TicketTier> existing = queries.tiersOf(e.getId()).stream()
                 .collect(Collectors.toMap(TicketTier::getId, Function.identity()));
@@ -156,7 +137,6 @@ public class OrganizerEventServiceImpl implements OrganizerEventService {
         existing.keySet().stream().sorted().forEach(tierId -> locked.put(tierId, inventory.findWithLockByTicketTierId(tierId)
                 .orElseThrow(() -> new IllegalStateException("Thiếu inventory cho tier " + tierId))));
 
-        // 1. Xóa tier không còn trong danh sách (chỉ khi chưa bán/giữ vé nào và chưa có đơn)
         Set<UUID> kept = inputs.stream().map(TierInput::id).filter(Objects::nonNull).collect(Collectors.toSet());
         for (TicketTier old : existing.values()) {
             if (kept.contains(old.getId())) continue;
@@ -170,7 +150,6 @@ public class OrganizerEventServiceImpl implements OrganizerEventService {
             inventory.flush();
             tiers.delete(old);
         }
-        // 2. Thêm tier mới, sửa tier cũ (TicketTier.update tự chặn giảm dưới số đã bán/giữ và đổi giá khi đã có vé)
         for (TierInput t : inputs) {
             if (t.id() == null) {
                 addTier(e.getId(), t);
@@ -186,7 +165,6 @@ public class OrganizerEventServiceImpl implements OrganizerEventService {
         }
     }
 
-    /** Ghi đè nội dung sự kiện từ request (PUT = thay toàn bộ); chuỗi rỗng thành null, mô tả bỏ đoạn trống. */
     private static Event apply(Event e, EventUpsertRequest r) {
         Venue venue = r.venue() == null ? null
                 : new Venue(blankToNull(r.venue().name()), blankToNull(r.venue().city()), blankToNull(r.venue().address()));
@@ -199,7 +177,6 @@ public class OrganizerEventServiceImpl implements OrganizerEventService {
         return e;
     }
 
-    /** Field có mặt thì phải hợp lệ, kể cả khi lưu nháp. */
     private static void checkDates(EventUpsertRequest r) {
         if (r.startsAt() != null && r.endsAt() != null && !r.endsAt().isAfter(r.startsAt())) {
             throw DomainException.invalid("endsAt", "Thời gian kết thúc phải sau thời gian bắt đầu");

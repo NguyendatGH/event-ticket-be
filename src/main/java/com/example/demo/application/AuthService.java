@@ -17,7 +17,6 @@ public interface AuthService {
 
     AuthResponse login(LoginRequest req);
 
-    /** Đăng nhập bằng Google: id_token FE gửi lên, chưa có tài khoản thì tạo mới. */
     AuthResponse loginWithGoogle(String idToken);
 
     AuthResponse refresh(String rawRefreshToken);
@@ -26,7 +25,6 @@ public interface AuthService {
 
     AuthResponse becomeOrganizer(UUID userId, OrganizerProfileRequest req);
 
-    /** Email so sánh không phân biệt hoa thường: luôn lưu và tra cứu ở dạng trim + chữ thường. */
     static String normalizeEmail(String email) {
         return email.trim().toLowerCase(Locale.ROOT);
     }

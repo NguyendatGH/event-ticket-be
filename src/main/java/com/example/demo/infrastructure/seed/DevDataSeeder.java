@@ -15,11 +15,6 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
-/**
- * Dữ liệu mẫu cho profile dev: chạy nguyên db/seed-dev.sql (sinh bởi db/gen-seed-sql.py từ seed/events.json),
- * giống hệt seed tay bằng psql. Mặc định không tự chạy; bật app.seed.on-startup=true.
- * POST /dev/seed xóa event/đơn (giữ users, organizers) rồi chạy lại file.
- */
 @Component
 @Profile("dev")
 public class DevDataSeeder implements CommandLineRunner {
@@ -44,7 +39,6 @@ public class DevDataSeeder implements CommandLineRunner {
         if (count("events") == 0) runScript();
     }
 
-    /** Xóa dữ liệu nghiệp vụ (cascade sang tier, kho, đơn, vé, payment) rồi seed lại. Giữ users, organizers. */
     @Transactional
     public Map<String, Object> reseed() {
         jdbc.execute("truncate table events, idempotency_records cascade");
@@ -60,7 +54,6 @@ public class DevDataSeeder implements CommandLineRunner {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        // Một Statement nhiều câu lệnh: PgJDBC tự tách, hiểu dollar-quote ($j$...$j$) của jsonb
         jdbc.execute(sql);
     }
 

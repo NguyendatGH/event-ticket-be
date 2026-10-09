@@ -19,16 +19,12 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.util.Set;
 
-/**
- * POST /api/v1/uploads/images: upload ảnh, trả URL để gắn vào hồ sơ/sự kiện. Cần đăng nhập.
- * Lưu qua ImageStorage: Cloudinary nếu có CLOUDINARY_URL, không thì thư mục uploads/ (xem StorageConfig).
- */
 @RestController
 @RequestMapping("/api/v1/uploads")
 @Tag(name = "Uploads", description = "Upload ảnh (avatar, ảnh bìa sự kiện, logo BTC)")
 public class UploadController {
 
-    static final long MAX_BYTES = 5L * 1024 * 1024;   // khớp spring.servlet.multipart.max-file-size
+    static final long MAX_BYTES = 5L * 1024 * 1024;
     private static final Set<String> FOLDERS = Set.of("avatars", "events", "organizers", "misc");
 
     private final ImageStorage storage;

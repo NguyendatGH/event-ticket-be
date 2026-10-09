@@ -25,11 +25,6 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
-/**
- * Nút bấm phía "provider" cho refund, CHỈ có ở src/test: chốt kết quả một lệnh chi rồi gửi webhook có chữ ký vào
- * POST /webhooks/mock-gateway/refund của chính app này (qua HTTP thật, để đi đúng đường verify chữ ký);
- * chỉnh số dư ví; bật cửa timeout.
- */
 @RestController
 @RequestMapping("/mock-gateway")
 @Profile("test")
@@ -73,7 +68,7 @@ public class MockRefundGatewayController {
         MockPaymentGateway.MockRefund r = mock.settleRefund(refund.getProviderRefundId(), next, failureCode);
 
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("eventId", r.id + ":" + next.name());     // cùng eventId khi gửi trùng -> webhook_events chặn
+        body.put("eventId", r.id + ":" + next.name());
         body.put("providerRefundId", r.id);
         body.put("referenceId", r.referenceId);
         body.put("state", next.name());
@@ -106,7 +101,7 @@ public class MockRefundGatewayController {
 
     private void postWebhook(String raw, String signature) {
         String port = env.getProperty("local.server.port", env.getProperty("server.port", "8080"));
-        RestClient.builder().defaultStatusHandler(s -> true, (req, res) -> { }).build()   // 401 khi ký sai là kết quả mong đợi
+        RestClient.builder().defaultStatusHandler(s -> true, (req, res) -> { }).build()
                 .post().uri("http://localhost:" + port + "/webhooks/mock-gateway/refund")
                 .contentType(MediaType.APPLICATION_JSON).header("X-Mock-Signature", signature)
                 .body(raw).retrieve().toBodilessEntity();

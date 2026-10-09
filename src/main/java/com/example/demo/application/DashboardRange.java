@@ -13,16 +13,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
-/**
- * Tham số chung của dashboard: khoảng ngày [from, to] gồm cả hai đầu theo giờ VN,
- * bucket day|week|month và eventId tùy chọn. Tham số sai → 400 VALIDATION kèm {@code errors} theo field.
- */
 public record DashboardRange(LocalDate from, LocalDate to, Interval interval, UUID eventId) {
 
     static final int DEFAULT_DAYS = 30;
     static final int MAX_DAYS = 366;
 
-    /** Tên hằng trùng đơn vị của date_trunc trong Postgres, nên nối thẳng vào SQL được (không lấy từ input thô). */
     public enum Interval { day, week, month }
 
     public static DashboardRange parse(String from, String to, String interval, String eventId, LocalDate today) {
@@ -70,12 +65,10 @@ public record DashboardRange(LocalDate from, LocalDate to, Interval interval, UU
         return ChronoUnit.DAYS.between(from, to) + 1;
     }
 
-    /** Khoảng liền trước cùng độ dài, kết thúc ngay trước {@code from}. */
     public DashboardRange previous() {
         return new DashboardRange(from.minusDays(days()), from.minusDays(1), interval, eventId);
     }
 
-    /** Mốc bắt đầu (00:00 giờ VN của from) và mốc kết thúc loại trừ (00:00 giờ VN của to + 1). */
     public OffsetDateTime start() {
         return from.atStartOfDay(VietnamTime.ZONE).toOffsetDateTime();
     }

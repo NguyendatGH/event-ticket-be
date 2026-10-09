@@ -13,10 +13,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/**
- * Summary và detail trong một record: summary bỏ description/schedule/tiers
- * (null, không serialize), organizer ở summary chỉ có id/slug/name/logoUrl/verified.
- */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record EventResponse(
         UUID id,
@@ -49,7 +45,7 @@ public record EventResponse(
                 e.getId(), e.getSlug(), e.getName(), e.getCategory(), e.getStartsAt(), e.getEndsAt(), e.getVenue(),
                 e.getCoverImageUrl(), e.getCoverImageAlt(),
                 tiers.stream().mapToLong(TicketTier::getPrice).min().orElse(0),
-                e.displayStatus(soldOut, Instant.now()),   // ENDED/SOLD_OUT là trạng thái tính, không lưu DB
+                e.displayStatus(soldOut, Instant.now()),
                 e.isFeatured(), e.getTagline(),
                 detail ? e.getDescription() : null,
                 detail ? e.getSchedule() : null,

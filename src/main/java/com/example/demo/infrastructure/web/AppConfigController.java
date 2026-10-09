@@ -9,10 +9,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/**
- * GET /api/v1/config: public. Trả cấu hình FE cần biết (application.yaml / .env)
- * để FE không phải chép cứng con số này. Chỉ đọc cấu hình, không có nghiệp vụ nên không cần service riêng.
- */
 @RestController
 @Tag(name = "Config", description = "Cấu hình nghiệp vụ cho FE")
 public class AppConfigController {
@@ -23,7 +19,6 @@ public class AppConfigController {
     public AppConfigController(@Value("${app.checkout.fee}") long checkoutFee,
                                @Value("${app.auth.google.client-id:}") String googleClientId) {
         this.checkoutFee = checkoutFee;
-        // Client ID là thông tin công khai (Google bắt buộc lộ ở trình duyệt), khác client secret.
         this.googleClientId = googleClientId == null || googleClientId.isBlank() ? null : googleClientId.trim();
     }
 

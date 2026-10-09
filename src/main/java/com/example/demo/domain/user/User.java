@@ -26,7 +26,6 @@ public class User {
     @Column(nullable = false, length = 200)
     private String email;
 
-    /** Hash BCrypt (60 ký tự). Không map ra DTO, không bao giờ trả về client. */
     @Column(name = "password_hash", nullable = false, length = 100)
     private String passwordHash;
 
@@ -60,10 +59,6 @@ public class User {
         return u;
     }
 
-    /**
-     * User tạo ra từ lần đăng nhập Google đầu tiên: lấy tên + ảnh đại diện của Google, role CUSTOMER.
-     * passwordHash là chuỗi ngẫu nhiên (xem AuthServiceImpl) vì tài khoản này không có mật khẩu do user đặt.
-     */
     public static User createFromGoogle(String fullName, String email, String passwordHash, String avatarUrl) {
         User u = create(fullName, email, passwordHash, UserRole.CUSTOMER);
         u.avatarUrl = avatarUrl;
@@ -85,10 +80,6 @@ public class User {
         if (role == UserRole.CUSTOMER) role = UserRole.ORGANIZER;
     }
 
-    /**
-     * Tên hiển thị công khai đã che (lịch sử vé): giữ từ đầu + chữ cái đầu của từ cuối.
-     * "Tran Thi B" → "Tran B.", "Nguyen Van An" → "Nguyen A."; một từ giữ nguyên.
-     */
     public static String maskedName(String fullName) {
         if (fullName == null) return null;
         String[] words = fullName.trim().split("\\s+");

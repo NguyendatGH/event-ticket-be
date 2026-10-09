@@ -51,7 +51,6 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/events/**", "/api/v1/organizers/**", "/api/v1/config",
                                 "/uploads/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/contact").permitAll()
-                        // /mock-gateway/**: chỉ có handler khi chạy test (MockGatewayController ở src/test); app thật trả 404
                         .requestMatchers("/webhooks/**", "/dev/**", "/mock-gateway/**").permitAll()
                         .requestMatchers("/api/v1/organizer/**").hasAnyRole("ORGANIZER", "ADMIN")
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
@@ -106,7 +105,7 @@ public class SecurityConfig {
     }
 
     private static void writeProblem(HttpServletResponse res, String code, String detail) throws IOException {
-        HttpStatus status = HttpStatus.valueOf(res.getStatus());   // 401, hoặc 403 nếu insufficient_scope
+        HttpStatus status = HttpStatus.valueOf(res.getStatus());
         res.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
         res.setCharacterEncoding("UTF-8");
         res.getWriter().write("""

@@ -12,6 +12,5 @@ public interface PaymentRepository extends JpaRepository<Payment, UUID> {
 
     Optional<Payment> findFirstByOrderIdOrderByCreatedAtDesc(UUID orderId);
 
-    /** Payment của nhiều đơn trong một query; service tự chọn bản mới nhất mỗi đơn. */
     List<Payment> findAllByOrderIdIn(Collection<UUID> orderIds);
 }

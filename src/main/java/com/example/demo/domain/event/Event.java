@@ -43,7 +43,6 @@ public class Event {
     @Column(length = 50)
     private String category;
 
-    /** Hạn hủy vé: trước giờ bắt đầu bao nhiêu giờ. Cột có sẵn từ V1 (default 48). */
     @Builder.Default
     @Column(name = "refund_deadline_hours", nullable = false)
     private int refundDeadlineHours = 48;
@@ -120,7 +119,6 @@ public class Event {
         return isEnded(status, startsAt, endsAt, now);
     }
 
-    /** Còn trong hạn hủy vé hay chưa. startsAt null (draft chưa điền) coi như không cho hoàn. */
     public boolean isRefundOpen(Instant now) {
         return startsAt != null && now.isBefore(startsAt.minus(Duration.ofHours(refundDeadlineHours)));
     }

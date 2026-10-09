@@ -40,8 +40,6 @@ public class IdempotencyServiceImpl implements IdempotencyService {
             return json.readValue(existing.get().getResponseBody(), responseType);
         }
         T response = action.get();
-        // GIỚI HẠN: hai request cùng key chạy đúng lúc cùng thấy "chưa có" -> unique orders.idempotency_key
-        // làm request thứ hai fail (500) thay vì tạo đơn thứ hai; nâng cấp: insert bản ghi PENDING trước rồi cập nhật.
         records.save(new IdempotencyRecord(scope, key, hash, HttpStatus.CREATED.value(), json.writeValueAsString(response)));
         return response;
     }

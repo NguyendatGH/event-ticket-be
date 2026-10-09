@@ -23,10 +23,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-/**
- * Hồ sơ ban tổ chức: nâng cấp tài khoản (POST /me/organizer → AuthService, vì phải phát JWT mới mang role mới),
- * xem/sửa hồ sơ của mình, trang public và danh sách BTC nổi bật cho trang chủ (→ OrganizerService). Quyền theo SecurityConfig.
- */
 @RestController
 @RequestMapping("/api/v1")
 @Tag(name = "Organizers", description = "Hồ sơ ban tổ chức")

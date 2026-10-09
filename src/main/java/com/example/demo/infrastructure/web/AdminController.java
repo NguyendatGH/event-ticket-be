@@ -13,13 +13,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
 
-/**
- * /api/v1/admin: công cụ tra soát cho ADMIN, chỉ ĐỌC.
- *
- * <p>ponytail: admin KHÔNG chốt refund. Tiền vé về tài khoản nhận của BTC, nên người duy nhất chuyển khoản tay
- * được là BTC — chốt refund nằm ở {@link OrganizerRefundController} (/api/v1/organizer/refunds). Luồng hoàn tiền
- * chỉ có hai bên: người mua yêu cầu, BTC duyệt.
- */
 @RestController
 @RequestMapping("/api/v1/admin")
 @PreAuthorize("hasRole('ADMIN')")

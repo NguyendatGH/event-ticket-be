@@ -26,17 +26,11 @@ import java.util.stream.Collectors;
 import static com.example.demo.domain.payment.WebhookProcessingResult.IGNORED;
 import static com.example.demo.domain.payment.WebhookProcessingResult.PROCESSED;
 
-/**
- * Một cửa duy nhất chốt kết quả refund và hoàn kho (poll, webhook, admin resolve đều đổ vào đây).
- * Một transaction: khóa order → khóa refund → chuyển trạng thái có điều kiện. Lần thứ hai thấy refund đã terminal
- * thì IGNORED, nên kho không bao giờ cộng hai lần dù webhook trùng, poll trùng hay admin bấm hai lần.
- */
 @Component
 public class RefundResultHandler {
 
     private static final Logger log = LoggerFactory.getLogger(RefundResultHandler.class);
 
-    /** Refund chưa kết thúc: tiền vẫn có thể ra khỏi ví cho những cái này. */
     private static final List<RefundStatus> OPEN = List.of(RefundStatus.REQUESTED, RefundStatus.AWAITING_FUNDS,
             RefundStatus.PROCESSING, RefundStatus.MANUAL_REVIEW);
 
@@ -55,14 +49,10 @@ public class RefundResultHandler {
         this.ledger = ledger;
     }
 
-    /**
-     * @param byAdmin true khi admin chốt MANUAL_REVIEW: bỏ qua điều kiện "đang PROCESSING",
-     *                nhưng vẫn KHÔNG đụng refund đã terminal.
-     */
     @Transactional
     public WebhookProcessingResult apply(UUID refundId, RefundStatusResult result, boolean byAdmin) {
         UUID orderId = refunds.findById(refundId).orElseThrow().getOrderId();
-        Order order = orders.findWithLockById(orderId).orElseThrow();   // khóa order trước, cùng thứ tự với RefundService.open()
+        Order order = orders.findWithLockById(orderId).orElseThrow();
         Refund refund = refunds.findWithLockById(refundId).orElseThrow();
 
         if (refund.isTerminal()) {
@@ -111,14 +101,9 @@ public class RefundResultHandler {
         return PROCESSED;
     }
 
-    /**
-     * Không bao giờ hoàn quá số tiền đã thu. Số đã thu và đã hoàn lấy từ sổ ledger (bất biến), phần đang bay
-     * lấy từ bảng refunds (chưa chuyển tiền nên chưa vào sổ). Ném ra là rollback cả transaction — đúng ý:
-     * thà refund không chốt được còn hơn sổ sách sai.
-     */
     private void assertNotOverRefunded(Order order) {
         long paidIn = ledger.customerLiabilityOf(order.getId());
-        if (paidIn <= 0) return;                   // chưa có bút toán thu: không có gì để so
+        if (paidIn <= 0) return;
         long refunded = ledger.refundedOf(order.getId());
         long inFlight = refunds.sumAmountByOrderIdAndStatusIn(order.getId(), OPEN);
         if (refunded + inFlight > paidIn) {
@@ -127,7 +112,6 @@ public class RefundResultHandler {
         }
     }
 
-    /** Cộng kho theo tier, khóa theo tier id tăng dần như CheckoutService để không deadlock chéo với checkout. */
     private void releaseInventory(List<Ticket> refunded) {
         Map<UUID, Long> byTier = refunded.stream()
                 .collect(Collectors.groupingBy(Ticket::getTicketTierId, TreeMap::new, Collectors.counting()));

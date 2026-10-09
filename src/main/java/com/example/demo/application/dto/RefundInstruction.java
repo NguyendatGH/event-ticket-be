@@ -2,7 +2,6 @@ package com.example.demo.application.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
-/** Thông tin để admin chuyển khoản tay cho refund MANUAL_REVIEW. Quét qrImageUrl bằng app ngân hàng. */
 @Schema(description = "Hướng dẫn chuyển khoản tay cho một refund")
 public record RefundInstruction(
         @Schema(example = "https://img.vietqr.io/image/970436-1234567890-compact2.png?amount=200000") String qrImageUrl,

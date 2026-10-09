@@ -24,10 +24,6 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * Dashboard organizer qua HTTP trên seed dev (ui-api-contract §4.5): số liệu API khớp SQL độc lập (đếm vé qua bảng
- * tickets, lọc ngày bằng ::date giờ VN), đủ bucket, chỉ dữ liệu của organizer hiện tại, và các mã lỗi.
- */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "app.jwt.secret=test-secret-test-secret-test-secret-1234",
         "DB_URL=unused", "DB_USERNAME=unused", "DB_PASSWORD=unused"
@@ -89,7 +85,6 @@ class DashboardFlowTests {
         return l;
     }
 
-    /** SQL độc lập: [orders, tickets, revenue] PAID của Sunrise Live có ngày paid_at (giờ VN) trong [from, to]. */
     private long[] expected(LocalDate from, LocalDate to) {
         return jdbc.queryForObject("""
                 select count(*), coalesce(sum((select count(*) from tickets t where t.order_id = o.id)), 0),
@@ -123,7 +118,6 @@ class DashboardFlowTests {
         assertEquals(prev[2], num(revenue.get("previous")));
         assertEquals(Math.round((cur[2] - prev[2]) * 1000.0 / prev[2]) / 10.0, ((Number) revenue.get("changePct")).doubleValue());
 
-        // Sunrise Live: Lumière (PUBLISHED), Đà Nẵng (UPCOMING), Summer Sessions (đã qua → ENDED), Countdown (DRAFT)
         assertEquals(Map.of("total", 4, "draft", 1, "published", 1, "upcoming", 1, "ended", 1, "cancelled", 0), s.get("events"));
         Map<?, ?> t = (Map<?, ?>) s.get("tickets");
         assertEquals(num(t.get("total")), num(t.get("sold")) + num(t.get("available")), "seed: kho = tổng − đã bán");

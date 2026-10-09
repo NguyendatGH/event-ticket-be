@@ -14,7 +14,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-/** POST /api/v1/contact: form trang Liên hệ, public. Gọi ContactService. */
 @RestController
 @Tag(name = "Contact", description = "Gửi liên hệ")
 public class ContactController {

@@ -107,7 +107,6 @@ public class CheckoutServiceImpl implements CheckoutService {
                 order.getItems().stream().map(i -> new CreatePaymentCommand.Item(i.getTierName(), i.getQuantity(), i.getUnitPrice())).toList(),
                 returnUrl + "?orderId=" + order.getId(), cancelUrl + "?orderId=" + order.getId(), order.getExpiresAt());
         long startedAt = System.currentTimeMillis();
-        // catch nằm TRONG scope để log lỗi cũng có tiền tố
         try (LogContext.Scope ignored = LogContext.order(gateway.provider().name(), order.getOrderCode())) {
             try {
                 log.info("Sending create payment request");
@@ -131,9 +130,6 @@ public class CheckoutServiceImpl implements CheckoutService {
         }
     }
 
-    /**
-     * Giữ vé: kiểm tra đơn, khóa inventory từng hạng vé và trừ kho. Chạy trong TX1.
-     */
     private Order reserveTiers(CreateOrderRequest req, String idempotencyKey, UUID userId) {
         Event event = events.findById(req.eventId())
                 .orElseThrow(() -> DomainException.notFound("EVENT_NOT_FOUND", "Không tìm thấy sự kiện"));
@@ -179,7 +175,7 @@ public class CheckoutServiceImpl implements CheckoutService {
             Order o = orders.findWithLockById(orderId)
                     .orElseThrow(() -> DomainException.notFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng"));
             o.requireOwner(userId);
-            o.cancel();   // chỉ PENDING_PAYMENT, khác → 409 ORDER_NOT_CANCELLABLE
+            o.cancel();
             fulfilment.release(o);
             closePayment(o);
             return o;
@@ -200,10 +196,6 @@ public class CheckoutServiceImpl implements CheckoutService {
         return true;
     }
 
-    /**
-     * Đóng payment của đơn vừa EXPIRED/CANCELLED. Đã nhận tiền thiếu (UNDERPAID) thì không xóa dấu vết: payment giữ
-     * UNDERPAID, đơn sang MANUAL_REVIEW như tiền vào muộn (vé đã trả, người xử lý hoàn tiền thủ công).
-     */
     private void closePayment(Order order) {
         payments.findFirstByOrderIdOrderByCreatedAtDesc(order.getId()).ifPresent(p -> {
             if (p.getStatus() == PaymentStatus.UNDERPAID) {

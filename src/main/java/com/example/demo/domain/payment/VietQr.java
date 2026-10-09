@@ -2,23 +2,6 @@ package com.example.demo.domain.payment;
 
 import java.nio.charset.StandardCharsets;
 
-/**
- * Builds an EMVCo / Napas VietQR payload (QR IBFT to account, "QRIBFTTA"). Used for the mode B refund QR the
- * merchant scans and for the stub collection client's fake payment QR.
- *
- * <pre>
- * 00 02 01                      payload format indicator
- * 01 02 12                      point of initiation: dynamic
- * 38 LL  [00 06 A000000727]     Napas GUID
- *        [01 LL [00 06 bin][01 LL account]]
- *        [02 08 QRIBFTTA]
- * 53 03 704                     currency VND
- * 54 LL amount                  (omitted when amount <= 0)
- * 58 02 VN
- * 62 LL [08 LL content]         additional data: purpose of transaction (omitted when blank)
- * 63 04 CRC                     CRC16-CCITT-FALSE over everything including "6304", uppercase hex
- * </pre>
- */
 public final class VietQr {
   public static final String NAPAS_GUID = "A000000727";
   public static final String SERVICE_TO_ACCOUNT = "QRIBFTTA";
@@ -48,7 +31,6 @@ public final class VietQr {
     return sb.toString();
   }
 
-  /** ASCII letters, digits and spaces only, collapsed and trimmed, at most {@link #MAX_CONTENT} chars. */
   public static String sanitizeContent(String content) {
     if (content == null) return "";
     String s = content.replaceAll("[^A-Za-z0-9 ]", " ").replaceAll("\\s+", " ").trim();
@@ -60,7 +42,6 @@ public final class VietQr {
     return id + String.format("%02d", value.length()) + value;
   }
 
-  /** CRC16-CCITT-FALSE: poly 0x1021, init 0xFFFF, no reflection, no final xor. Uppercase 4-hex. */
   public static String crc16(String s) {
     int crc = 0xFFFF;
     for (byte b : s.getBytes(StandardCharsets.US_ASCII)) {

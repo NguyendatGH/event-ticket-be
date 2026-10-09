@@ -31,10 +31,6 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-/**
- * Phần ĐỌC của đơn hàng: GET /orders/{id} (OrderController), GET /me/orders (MyTicketsController),
- * audit đơn cho admin, trang giả lập thanh toán. Phần ghi (tạo/hủy/hết hạn) nằm ở CheckoutService.
- */
 @Service
 public class OrderQueriesImpl implements OrderQueries {
 
@@ -51,7 +47,6 @@ public class OrderQueriesImpl implements OrderQueries {
         this.tickets = tickets;
     }
 
-    /** Ai có id đơn cũng xem được (khách vãng lai quay về từ cổng thanh toán chỉ có id). */
     @Override
     @Transactional(readOnly = true)
     public OrderResponse get(UUID orderId) {
@@ -71,10 +66,6 @@ public class OrderQueriesImpl implements OrderQueries {
                 .orElseThrow(() -> DomainException.notFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng"));
     }
 
-    /**
-     * Đơn của user, mới nhất trước; mỗi trang cố định vài query (items, vé, payment, event theo lô).
-     * {@code status} tùy chọn: nhiều OrderStatus cách nhau dấu phẩy (vd "CANCELLED,EXPIRED"), bỏ trống = mọi trạng thái.
-     */
     @Override
     @Transactional(readOnly = true)
     public PageResponse<OrderResponse> myOrders(UUID userId, String status, int page, int size) {
@@ -85,7 +76,6 @@ public class OrderQueriesImpl implements OrderQueries {
         return PageResponse.of(p, toResponses(p.getContent()));
     }
 
-    /** "PAID, pending_payment" → {PAID, PENDING_PAYMENT}; phần rỗng bỏ qua; giá trị lạ → 400 VALIDATION (field status). */
     static Set<OrderStatus> parseStatuses(String status) {
         Set<OrderStatus> result = EnumSet.noneOf(OrderStatus.class);
         if (status == null) return result;
@@ -102,7 +92,6 @@ public class OrderQueriesImpl implements OrderQueries {
         return result;
     }
 
-    /** Không tự mở transaction: CheckoutService gọi hàm này bên trong transaction của nó. */
     @Override
     public OrderResponse toResponse(Order order) {
         return toResponses(List.of(order)).getFirst();
@@ -113,7 +102,6 @@ public class OrderQueriesImpl implements OrderQueries {
         List<UUID> ids = list.stream().map(Order::getId).toList();
         Map<UUID, Event> eventById = events.findAllById(list.stream().map(Order::getEventId).distinct().toList()).stream()
                 .collect(Collectors.toMap(Event::getId, Function.identity()));
-        // Một đơn có thể có nhiều payment (tạo lại link); chỉ trả payment mới nhất
         Map<UUID, Payment> latestPayment = new HashMap<>();
         payments.findAllByOrderIdIn(ids).forEach(p -> latestPayment.merge(p.getOrderId(), p,
                 (a, b) -> a.getCreatedAt().isAfter(b.getCreatedAt()) ? a : b));
@@ -124,10 +112,6 @@ public class OrderQueriesImpl implements OrderQueries {
                 .toList();
     }
 
-    /**
-     * Vé cấp từ từng đơn mà người đặt đơn vẫn là chủ. Vé đã đổi chủ trước khi bỏ tính năng bán lại không hiện ở
-     * đơn gốc (đơn tra được bằng id, không được lộ mã vé của chủ mới).
-     */
     private Map<UUID, List<Ticket>> ticketsStillHeld(List<Order> list) {
         Map<UUID, Order> byId = list.stream().collect(Collectors.toMap(Order::getId, Function.identity()));
         Map<UUID, List<Ticket>> result = new HashMap<>();

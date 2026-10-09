@@ -43,7 +43,7 @@ public class CloudinaryImageStorage implements ImageStorage {
         body.add("signature", sign(signed, apiSecret));
         body.add("file", new ByteArrayResource(data) {
             @Override
-            public String getFilename() {   // thiếu filename thì part không được gửi dạng file
+            public String getFilename() {
                 return UUID.randomUUID() + "." + type.extension;
             }
         });

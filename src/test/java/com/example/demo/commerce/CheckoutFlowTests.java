@@ -32,11 +32,6 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * Một Postgres thật trong Docker: chứng minh Flyway V1 + Hibernate validate khớp nhau, luồng checkout
- * (giữ vé có khóa, idempotency, hủy, hết hạn) và luồng thanh toán qua mock gateway (webhook ký HMAC,
- * PAID đúng một lần, trùng, sai chữ ký, thiếu tiền, tiền vào muộn) đúng end-to-end qua HTTP.
- */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "app.jwt.secret=test-secret-test-secret-test-secret-1234",
         "DB_URL=unused", "DB_USERNAME=unused", "DB_PASSWORD=unused"
@@ -61,16 +56,13 @@ class CheckoutFlowTests {
     @Autowired JdbcTemplate jdbc;
     @Autowired MockPaymentGateway mockGateway;
 
-    /* ---------- helpers (RestClient không ném lỗi ở 4xx để đọc body problem+json) ---------- */
 
-    /** Đơn hàng giờ bắt buộc đăng nhập, nên mọi request mặc định mang token của người mua. */
     private RestClient http() {
         return RestClient.builder().baseUrl("http://localhost:" + port)
                 .defaultStatusHandler(status -> true, (req, res) -> { })
                 .defaultHeaders(h -> h.setBearerAuth(token())).build();
     }
 
-    /** Không token: dùng để kiểm endpoint có thật sự chặn khách chưa đăng nhập. */
     private RestClient anon() {
         return RestClient.builder().baseUrl("http://localhost:" + port)
                 .defaultStatusHandler(status -> true, (req, res) -> { }).build();
@@ -83,7 +75,6 @@ class CheckoutFlowTests {
         return token;
     }
 
-    /** Đăng ký một người mua mới và trả accessToken. Email ngẫu nhiên để các test không giẫm nhau. */
     @SuppressWarnings("unchecked")
     private String register() {
         Map<?, ?> auth = anon().post().uri("/api/v1/auth/register")
@@ -142,13 +133,11 @@ class CheckoutFlowTests {
         return (Map<?, ?>) order.get("payment");
     }
 
-    /** [signature_valid, processing_result] của các webhook thuộc payment của đơn, theo thứ tự nhận. */
     private List<String> webhooks(Map<?, ?> order) {
         return jdbc.query("select signature_valid, processing_result from webhook_events where event_id like ? order by received_at",
                 (rs, i) -> rs.getBoolean(1) + ":" + rs.getString(2), payment(order).get("paymentLinkId") + "%");
     }
 
-    /* ---------- tests: phải đăng nhập mới mua ---------- */
 
     @Test
     void guestCannotCreateOrder() {
@@ -165,7 +154,6 @@ class CheckoutFlowTests {
         assertEquals(10, available(t), "không giữ vé cho người chưa đăng nhập");
     }
 
-    /** Đơn của người khác: trả 404 chứ không 403, để người lạ dò orderId không biết đơn có tồn tại. */
     @Test
     void otherUserSeesNeitherOrderNorCancel() {
         Event e = event(EventStatus.PUBLISHED, "Hà Nội");
@@ -184,7 +172,6 @@ class CheckoutFlowTests {
         assertEquals("PENDING_PAYMENT", order(orderId).get("status"), "đơn của chủ thật không bị ai hủy");
     }
 
-    /* ---------- tests: checkout ---------- */
 
     @Test
     void checkoutReservesInventoryAndReturnsContractShape() {
@@ -199,7 +186,7 @@ class CheckoutFlowTests {
         assertEquals(e.getSlug(), o.get("eventSlug"));
         assertEquals(1_000_000, ((Number) o.get("subtotalAmount")).longValue());
         assertEquals(0, ((Number) o.get("feeAmount")).longValue());
-        assertEquals(1_000_000, ((Number) o.get("totalAmount")).longValue());   // không phí sàn: total == subtotal
+        assertEquals(1_000_000, ((Number) o.get("totalAmount")).longValue());
         Map<?, ?> payment = payment(o);
         assertEquals("MOCK", payment.get("provider"));
         assertEquals("PENDING", payment.get("status"));
@@ -209,7 +196,6 @@ class CheckoutFlowTests {
         assertNotNull(o.get("expiresAt"));
         assertEquals(8, available(t));
 
-        // GET trả cùng đơn
         Map<?, ?> fetched = get("/api/v1/orders/" + o.get("id")).getBody();
         assertEquals(o.get("orderCode"), fetched.get("orderCode"));
     }
@@ -282,11 +268,6 @@ class CheckoutFlowTests {
         assertEquals(3, available(t), "hủy lần hai không cộng kho thêm");
     }
 
-    /**
-     * Ca mất tiền thật gặp ở dev 2026-09-29: khách chuyển tiền xong, webhook KHÔNG về (webhook-url chưa
-     * đăng ký với PayOS), trang return hết 90s nên khách bấm "Hủy đơn" -> đơn CANCELLED, trả kho, 0 vé,
-     * tiền đã vào tài khoản mà không chỗ nào ghi nhận. Hủy phải hỏi cổng trước khi hủy.
-     */
     @Test
     void cancelKhongHuyDonKhachDaTraDuTienDuWebhookChuaVe() {
         Event e = event(EventStatus.PUBLISHED, "Hà Nội");
@@ -294,7 +275,6 @@ class CheckoutFlowTests {
         String id = (String) createOrder(UUID.randomUUID().toString(), e.getId(), t.getId(), 2).getBody().get("id");
         assertEquals(1, available(t));
 
-        // Tiền vào ở "provider" nhưng không gửi webhook nào — đúng hiện trường lúc webhook rớt.
         long total = ((Number) order(id).get("totalAmount")).longValue();
         String providerPaymentId = jdbc.queryForObject(
                 "select provider_payment_id from payments where order_id = ?::uuid", String.class, id);
@@ -324,7 +304,6 @@ class CheckoutFlowTests {
         assertEquals("EXPIRED", payment(order(id)).get("status"));
     }
 
-    /* ---------- tests: thanh toán qua mock gateway ---------- */
 
     @Test
     void mockSucceedPaysOnceIssuesTicketsAndIgnoresRepeat() {
@@ -370,7 +349,6 @@ class CheckoutFlowTests {
         assertEquals(List.of(), still.get("tickets"));
         assertEquals(1, jdbc.queryForObject("select count(*) from webhook_events where signature_valid = false and processing_result = 'REJECTED_SIGNATURE'", Integer.class));
 
-        // provider đã ghi nhận tiền nhưng webhook rớt: job hết hạn hỏi provider trước khi hủy đơn
         jdbc.update("update orders set expires_at = now() - interval '1 minute' where id = ?::uuid", id);
         expiryJob.run();
         Map<?, ?> recovered = order(id);
@@ -466,7 +444,7 @@ class CheckoutFlowTests {
     @Test
     void gatewayFailureCancelsOrderReleasesInventoryAndLogsTheCall() {
         Event e = event(EventStatus.PUBLISHED, "Hà Nội");
-        TicketTier t = tier(e, 3, 4, 13);   // tổng 13, mock từ chối khi amount % 1000 == 13
+        TicketTier t = tier(e, 3, 4, 13);
         String key = UUID.randomUUID().toString();
 
         ResponseEntity<Map> res = createOrder(key, e.getId(), t.getId(), 1);

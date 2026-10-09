@@ -24,20 +24,16 @@ public interface RefundRepository extends JpaRepository<Refund, UUID> {
 
     List<Refund> findAllByStatusOrderByCreatedAt(RefundStatus status);
 
-    /** Hàng chờ ví: theo thứ tự vào hàng (FIFO, không chen). */
     List<Refund> findAllByStatusOrderByQueuedSince(RefundStatus status);
 
-    /** Recovery: REQUESTED đã gửi (có submittedAt) mà quá lâu không có kết quả. */
     List<Refund> findAllByStatusAndSubmittedAtBefore(RefundStatus status, Instant before);
 
-    /** Recovery: REQUESTED chưa từng gửi (kill switch tắt, hoặc crash giữa TX1 và submit). */
     List<Refund> findAllByStatusAndSubmittedAtIsNullAndCreatedAtBefore(RefundStatus status, Instant before);
 
     Optional<Refund> findByProviderAndProviderRefundId(PaymentProvider provider, String providerRefundId);
 
     Optional<Refund> findByIdempotencyKey(String idempotencyKey);
 
-    /** Refund của các sự kiện thuộc một BTC. Tiền nằm ở tài khoản BTC nên chính họ duyệt, không phải admin. */
     @Query(value = """
             select r.* from refunds r
             join orders o on o.id = r.order_id
@@ -57,11 +53,9 @@ public interface RefundRepository extends JpaRepository<Refund, UUID> {
 
     long countByStatus(RefundStatus status);
 
-    /** Tiền đang cam kết chi (đang gửi hoặc provider đang xử lý). */
     @Query("select coalesce(sum(r.amount), 0) from Refund r where r.status in :statuses")
     long sumAmountByStatusIn(@Param("statuses") Collection<RefundStatus> statuses);
 
-    /** Tổng tiền các refund chưa kết thúc của MỘT đơn — dùng cho assert không hoàn quá số đã thu. */
     @Query("select coalesce(sum(r.amount), 0) from Refund r where r.orderId = :orderId and r.status in :statuses")
     long sumAmountByOrderIdAndStatusIn(@Param("orderId") UUID orderId, @Param("statuses") Collection<RefundStatus> statuses);
 }

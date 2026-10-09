@@ -8,10 +8,6 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/**
- * Cầu nối giữa bảng users và Spring Security. DaoAuthenticationProvider gọi
- * loadUserByUsername(email) lúc login rồi tự so password bằng PasswordEncoder.
- */
 @Service
 public class AppUserDetailsService implements UserDetailsService {
 
@@ -30,7 +26,7 @@ public class AppUserDetailsService implements UserDetailsService {
         return org.springframework.security.core.userdetails.User
                 .withUsername(u.getEmail())
                 .password(u.getPasswordHash())
-                .roles(u.getRole().name())   // tự thêm tiền tố ROLE_
+                .roles(u.getRole().name())
                 .build();
     }
 }

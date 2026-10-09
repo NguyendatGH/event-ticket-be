@@ -11,10 +11,6 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 import java.nio.charset.StandardCharsets;
 
-/**
- * BCrypt giới hạn 72 BYTE chứ không phải 72 ký tự: chữ có dấu tốn 2-3 byte nên {@code @Size(max = 72)} vẫn lọt
- * rồi BCryptPasswordEncoder ném IllegalArgumentException. Chặn sớm ở đây để trả 400 VALIDATION đúng field.
- */
 @Target({ElementType.FIELD, ElementType.PARAMETER, ElementType.RECORD_COMPONENT})
 @Retention(RetentionPolicy.RUNTIME)
 @Constraint(validatedBy = PasswordBytes.Validator.class)

@@ -7,7 +7,6 @@ import com.example.demo.infrastructure.web.TraceIdFilter;
 
 import java.util.Map;
 
-/** {@code %logPrefix}: dựng {@code [BACKEND][PAYOS][orderCode=...][trace=...] } từ MDC, thiếu key nào bỏ đoạn đó. */
 public class LogPrefixConverter extends ClassicConverter {
 
     @Override

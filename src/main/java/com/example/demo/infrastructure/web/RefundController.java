@@ -22,11 +22,6 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * Yêu cầu hoàn tiền theo vé. Trả 202 vì tiền đi bất đồng bộ — client đọc GET /refunds/{id} để biết kết quả.
- * Phải đăng nhập và là chủ đơn (tiền RA + hủy vé, không dựa vào orderId khó đoán như endpoint chỉ đọc);
- * không phải chủ đơn → 404 để không lộ đơn có tồn tại.
- */
 @RestController
 @RequestMapping("/api/v1")
 @Tag(name = "Refunds", description = "Hoàn tiền theo vé, chạy bằng lệnh chi ở cổng thanh toán")

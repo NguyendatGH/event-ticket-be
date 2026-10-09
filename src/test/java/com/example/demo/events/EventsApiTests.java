@@ -27,10 +27,6 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * Sự kiện qua HTTP trên Postgres thật + seed dev (ui-api-contract §4.3, §4.4): lọc/sắp xếp danh sách công khai,
- * trang BTC, và vòng đời sự kiện của BTC (nháp → publish → sửa có ràng buộc vé đã bán → xóa nháp).
- */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "app.jwt.secret=test-secret-test-secret-test-secret-1234",
         "DB_URL=unused", "DB_USERNAME=unused", "DB_PASSWORD=unused"
@@ -65,7 +61,6 @@ class EventsApiTests {
         admin = token("admin@example.com");
     }
 
-    /* ---------- helpers ---------- */
 
     private RestClient http() {
         return RestClient.builder().baseUrl("http://localhost:" + port)
@@ -116,7 +111,6 @@ class EventsApiTests {
         return jdbc.queryForObject("select id::text from events where slug = ?", String.class, slug);
     }
 
-    /** Body PUT từ OrganizerEventDetail hiện tại (FE gửi lại nguyên form). */
     private Map<String, Object> upsertFrom(Map<?, ?> detail) {
         Map<String, Object> body = new HashMap<>();
         for (String k : List.of("name", "category", "tagline", "description", "coverImageUrl", "coverImageAlt", "startsAt",
@@ -155,7 +149,6 @@ class EventsApiTests {
         assertEquals(204, call(HttpMethod.DELETE, "/api/v1/organizer/events/" + id, organizer2, null).getStatusCode().value());
     }
 
-    /* ---------- public ---------- */
 
     @Test
     void publicListHidesPastAndDraftUnlessAsked() {
@@ -167,7 +160,6 @@ class EventsApiTests {
 
     @Test
     void publicListFiltersAndSorts() {
-        // q khớp tên BTC
         List<Object> sunrise = slugs(content(get("/api/v1/events?q=sunrise")));
         assertTrue(sunrise.containsAll(List.of("the-lumiere-tour", "da-nang-beach-fest")), sunrise.toString());
         assertEquals(sunrise, slugs(content(get("/api/v1/events?organizer=sunrise-live"))));
@@ -217,11 +209,9 @@ class EventsApiTests {
         assertError(call(HttpMethod.GET, "/api/v1/organizers/khong-co/events", null, null), 404, "ORGANIZER_NOT_FOUND");
     }
 
-    /* ---------- organizer ---------- */
 
     @Test
     void draftLifecycleCreatePublishDelete() {
-        // BTC Saigon Jazz Club: không làm lệch các khẳng định danh sách chính xác của Sunrise Live ở test khác
         ResponseEntity<Map> created = call(HttpMethod.POST, "/api/v1/organizer/events", organizer2, Map.of("name", "Đêm nhạc Đà Lạt"));
         assertEquals(201, created.getStatusCode().value(), String.valueOf(created.getBody()));
         Map<?, ?> draft = created.getBody();
@@ -255,7 +245,6 @@ class EventsApiTests {
         assertError(call(HttpMethod.POST, "/api/v1/organizer/events/" + id + "/publish", organizer2, null), 409, "EVENT_NOT_DRAFT");
         assertError(call(HttpMethod.DELETE, "/api/v1/organizer/events/" + id, organizer2, null), 409, "EVENT_NOT_DELETABLE");
 
-        // BTC khác / khách / admin không có hồ sơ
         assertError(call(HttpMethod.GET, "/api/v1/organizer/events/" + id, organizer, null), 404, "EVENT_NOT_FOUND");
         assertEquals(403, call(HttpMethod.GET, "/api/v1/organizer/events", customer, null).getStatusCode().value());
         assertError(call(HttpMethod.GET, "/api/v1/organizer/events", admin, null), 404, "ORGANIZER_NOT_FOUND");
@@ -273,7 +262,6 @@ class EventsApiTests {
         assertTrue(((Number) stats.get("ticketsSold")).longValue() > 0, stats.toString());
         assertTrue(((Number) stats.get("revenue")).longValue() > 0, stats.toString());
 
-        // tier có vé bán: tìm chỉ số
         List<?> tiers = (List<?>) detail.get("tiers");
         int sold = -1;
         for (int i = 0; i < tiers.size(); i++) {

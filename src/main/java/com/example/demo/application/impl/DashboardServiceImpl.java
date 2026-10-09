@@ -24,16 +24,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/**
- * Dashboard của BTC đang đăng nhập. Chỉ đọc, SQL thẳng bằng JdbcClient vì toàn phép gộp trên nhiều bảng.
- * Chỉ tính đơn PAID theo {@code paid_at} (giờ VN), doanh thu = subtotal_amount (không gồm phí).
- * GIỚI HẠN: tính trực tiếp mỗi request, đủ vài chục nghìn đơn/BTC; nặng hơn thì làm bảng tổng hợp theo ngày.
- */
 @Service
 @Transactional(readOnly = true)
 public class DashboardServiceImpl implements DashboardService {
 
-    /** Đơn PAID của organizer trong [start, end); {@code q.qty} = tổng số vé của đơn. */
     private static final String PAID_ORDERS = """
             from orders o
             join events e on e.id = o.event_id
@@ -42,7 +36,6 @@ public class DashboardServiceImpl implements DashboardService {
               and o.paid_at >= :start and o.paid_at < :end
             """;
 
-    /** Trạng thái hiển thị, cùng luật với Event.displayStatus (bản Java): ENDED, SOLD_OUT là tính toán. */
     private static final String DISPLAY_STATUS = """
             case when e.status in ('PUBLISHED', 'UPCOMING') and coalesce(e.ends_at, e.starts_at) < now() then 'ENDED'
                  when e.status = 'PUBLISHED' and exists (select 1 from ticket_tiers t where t.event_id = e.id)
@@ -86,7 +79,6 @@ public class DashboardServiceImpl implements DashboardService {
                 .map(b -> new DashboardRevenuePoint(b.date(), b.revenue())).toList();
     }
 
-    /** Sự kiện có đơn PAID trong khoảng, doanh thu giảm dần. */
     @Override
     public List<DashboardTopEvent> topEvents(UUID userId, DashboardRange range, int limit) {
         UUID org = organizerOf(userId, range);
@@ -101,7 +93,6 @@ public class DashboardServiceImpl implements DashboardService {
                 .list();
     }
 
-    /** User hiện tại phải có hồ sơ organizer (ADMIN không có → 404); eventId phải thuộc organizer đó. */
     private UUID organizerOf(UUID userId, DashboardRange range) {
         UUID org = organizers.findByUserId(userId).map(Organizer::getId)
                 .orElseThrow(() -> DomainException.notFound("ORGANIZER_NOT_FOUND", "Bạn chưa có hồ sơ ban tổ chức"));
@@ -121,9 +112,8 @@ public class DashboardServiceImpl implements DashboardService {
                 .single();
     }
 
-    /** Mọi bucket trong [from, to] đều có mặt (generate_series), bucket trống = 0; week = thứ 2, month = ngày 1. */
     private List<Bucket> buckets(UUID org, DashboardRange range) {
-        String unit = range.interval().name();   // từ enum, an toàn để nối vào SQL
+        String unit = range.interval().name();
         String sql = """
                 with b as (
                     select g::date as bucket
@@ -147,7 +137,6 @@ public class DashboardServiceImpl implements DashboardService {
                 .list();
     }
 
-    /** ENDED tính toán: PUBLISHED/UPCOMING đã qua giờ kết thúc; published/upcoming chỉ đếm sự kiện chưa kết thúc. */
     private EventCounts eventCounts(UUID org) {
         return jdbc.sql("""
                         select count(*) as total,
@@ -163,7 +152,6 @@ public class DashboardServiceImpl implements DashboardService {
                 .single();
     }
 
-    /** total = tổng total_quantity, sold = vé đã phát (trừ REFUNDED), available = tổng inventory.available. */
     private TicketCounts ticketCounts(UUID org, UUID eventId) {
         String filter = eventId == null ? "" : " and e.id = :eventId";
         JdbcClient.StatementSpec spec = jdbc.sql("""

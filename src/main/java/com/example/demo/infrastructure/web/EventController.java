@@ -17,7 +17,6 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.LocalDate;
 import java.util.List;
 
-/** Sự kiện công khai: /api/v1/events/** và /api/v1/organizers/{idOrSlug}/events. Public, gọi EventService. */
 @RestController
 @RequestMapping("/api/v1")
 @Tag(name = "Events", description = "Danh sách và chi tiết sự kiện, công khai")

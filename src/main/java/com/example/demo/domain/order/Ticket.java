@@ -62,7 +62,6 @@ public class Ticket {
 
     public void markRefunded() { require(TicketStatus.REFUND_PENDING, TicketStatus.REFUNDED); status = TicketStatus.REFUNDED; }
 
-    /** Refund thất bại: vé dùng lại được. */
     public void restoreActive() { require(TicketStatus.REFUND_PENDING, TicketStatus.ACTIVE); status = TicketStatus.ACTIVE; }
 
     public boolean isActive() { return status == TicketStatus.ACTIVE; }
@@ -72,6 +71,6 @@ public class Ticket {
     }
 
     private static String newCode() {
-        return UUID.randomUUID().toString();   // GIỚI HẠN: UUID đủ cho demo; mã ngắn + checksum nếu cần in QR đẹp
+        return UUID.randomUUID().toString();
     }
 }

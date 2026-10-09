@@ -9,11 +9,6 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
-/**
- * Ba phép tính trên số dư ví chi của provider (không phải ví của mình):
- * committed = refund REQUESTED/PROCESSING, available = balance − committed, liability = tổng giá vé ACTIVE.
- * AWAITING_FUNDS KHÔNG tính vào committed, nếu không hàng chờ tự chặn chính nó mãi mãi.
- */
 @Service
 public class WalletService {
 
@@ -31,7 +26,6 @@ public class WalletService {
         this.tickets = tickets;
     }
 
-    /** Gọi provider: KHÔNG gọi bên trong transaction. */
     public long available() {
         return gateway.getPayoutBalance() - refunds.sumAmountByStatusIn(COMMITTED);
     }

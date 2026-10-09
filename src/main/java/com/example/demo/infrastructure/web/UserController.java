@@ -19,7 +19,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-/** /api/v1/users: hồ sơ của user đăng nhập (/me) và danh sách user cho ADMIN. Gọi UserService. */
 @RestController
 @RequestMapping("/api/v1/users")
 @Tag(name = "Users", description = "Hồ sơ cá nhân, quản lý user")
@@ -32,7 +31,7 @@ public class UserController {
     }
 
     @GetMapping
-    @PreAuthorize("hasRole('ADMIN')")   // token phải có claim roles chứa "ADMIN", nếu không -> 403
+    @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "Lấy toàn bộ user", description = "Chỉ ADMIN. Trả về danh sách user sắp xếp theo thời điểm tạo")
     public List<UserResponse> getAll() {
         return userService.findAll();

@@ -43,23 +43,19 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
 
-/**
- * Adapter PayOS qua SDK chính thức vn.payos:payos-java 2.0.1. Cổng thanh toán duy nhất của app.
- * Dùng: paymentRequests().create/get/cancel, webhooks().verify/confirm. Payout/refund: tạm gác.
- */
 @Component
-@Profile("!test")   // gateway duy nhất khi chạy app; test dùng MockPaymentGateway ở src/test
+@Profile("!test")
 public class PayOsPaymentGateway implements PaymentGatewayPort {
 
     private static final Logger log = LoggerFactory.getLogger(PayOsPaymentGateway.class);
     private static final DateTimeFormatter PAYOS_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private static final int DESCRIPTION_MAX = 25;   // giới hạn của PayOS cho nội dung chuyển khoản
+    private static final int DESCRIPTION_MAX = 25;
 
     private final PayOS client;
     private final String webhookUrl;
     private final PayOsPayoutClient payout;
 
-    @Autowired   // class có 2 constructor (cái dưới cho test), Spring cần biết chọn cái nào
+    @Autowired
     public PayOsPaymentGateway(@Value("${app.payos.client-id}") String clientId,
                                @Value("${app.payos.api-key}") String apiKey,
                                @Value("${app.payos.checksum-key}") String checksumKey,
@@ -83,7 +79,6 @@ public class PayOsPaymentGateway implements PaymentGatewayPort {
         return PaymentProvider.PAYOS;
     }
 
-    /** Đăng ký webhook URL với PayOS một lần lúc khởi động, chỉ khi app.payos.webhook-url được set. */
     @EventListener(ApplicationReadyEvent.class)
     public void confirmWebhook() {
         if (webhookUrl == null || webhookUrl.isBlank()) return;
@@ -138,12 +133,11 @@ public class PayOsPaymentGateway implements PaymentGatewayPort {
             throw DomainException.badRequest("INVALID_WEBHOOK", "Body không đúng định dạng webhook PayOS");
         }
         if (webhook.getData() == null || webhook.getSignature() == null) {
-            // SDK bỏ qua trường thiếu khi parse, nhưng verify() sẽ NPE nếu thiếu data/signature
             throw DomainException.badRequest("INVALID_WEBHOOK", "Webhook PayOS thiếu data hoặc signature");
         }
         WebhookData d;
         try {
-            d = client.webhooks().verify(webhook);   // HMAC-SHA256 trên data đã sort key, so với signature
+            d = client.webhooks().verify(webhook);
         } catch (WebhookException e) {
             throw new InvalidWebhookSignatureException("Chữ ký webhook PayOS không hợp lệ");
         }
@@ -181,7 +175,6 @@ public class PayOsPaymentGateway implements PaymentGatewayPort {
         return payout().balance();
     }
 
-    /** PayOS không có webhook cho lệnh chi: kết quả refund chỉ về qua poll (RefundPollJob). */
     @Override
     public RefundEvent verifyAndParseRefund(String rawBody, Map<String, String> headers) {
         throw DomainException.notFound("REFUND_WEBHOOK_UNSUPPORTED",
@@ -198,11 +191,6 @@ public class PayOsPaymentGateway implements PaymentGatewayPort {
         return description.length() <= DESCRIPTION_MAX ? description : description.substring(0, DESCRIPTION_MAX);
     }
 
-    /**
-     * PayOS trả HAI dạng transactionDateTime: webhook "yyyy-MM-dd HH:mm:ss" (giờ VN, không offset),
-     * GET /v2/payment-requests/{id} thì ISO-8601 có offset. Chỉ nhận dạng webhook thì mọi lần poll đơn ĐÃ TRẢ
-     * đều ném, pollAndApply đọc thành "chưa trả" và hủy oan đơn.
-     */
     static Instant parseTime(String payosDateTime) {
         if (payosDateTime == null || payosDateTime.isBlank()) return null;
         String raw = payosDateTime.trim();
@@ -216,9 +204,9 @@ public class PayOsPaymentGateway implements PaymentGatewayPort {
     private static PaymentStatusResult.Status mapStatus(vn.payos.model.v2.paymentRequests.PaymentLinkStatus s) {
         return switch (s) {
             case PAID -> PaymentStatusResult.Status.PAID;
-            case CANCELLED, FAILED -> PaymentStatusResult.Status.CANCELLED;   // FAILED coi như link không dùng được nữa
+            case CANCELLED, FAILED -> PaymentStatusResult.Status.CANCELLED;
             case EXPIRED -> PaymentStatusResult.Status.EXPIRED;
-            case PENDING, UNDERPAID, PROCESSING -> PaymentStatusResult.Status.PENDING; // amountPaid cho biết đã trả thiếu
+            case PENDING, UNDERPAID, PROCESSING -> PaymentStatusResult.Status.PENDING;
         };
     }
 
@@ -230,7 +218,6 @@ public class PayOsPaymentGateway implements PaymentGatewayPort {
         }
     }
 
-    /** Mã + mô tả lỗi PayOS, không bao giờ chứa api key. */
     private static String describe(PayOSException e) {
         if (e instanceof APIException api) {
             return api.getErrorCode().orElse("?") + " " + api.getErrorDesc().orElse(e.getMessage());

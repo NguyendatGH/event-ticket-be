@@ -12,10 +12,6 @@ import java.util.UUID;
 
 import static com.example.demo.application.support.Texts.blankToNull;
 
-/**
- * Trang Liên hệ (POST /api/v1/contact, ContactController).
- * GIỚI HẠN: chỉ lưu DB, chưa có màn hình admin đọc hay email báo; cần thì thêm GET /admin/contact-messages.
- */
 @Service
 public class ContactServiceImpl implements ContactService {
 
@@ -25,7 +21,6 @@ public class ContactServiceImpl implements ContactService {
         this.messages = messages;
     }
 
-    /** {@code userId} null khi khách chưa đăng nhập. */
     @Override
     @Transactional
     public ContactResponse send(ContactRequest req, UUID userId) {

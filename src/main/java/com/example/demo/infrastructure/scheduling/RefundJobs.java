@@ -9,10 +9,6 @@ import org.springframework.stereotype.Component;
 
 import java.util.UUID;
 
-/**
- * Ba việc nền của refund. Không ShedLock, một instance như OrderExpiryJob.
- * Lỗi của một job không được làm chết job khác, nên mỗi lần chạy bọc try/catch riêng.
- */
 @Component
 public class RefundJobs {
 
@@ -24,19 +20,16 @@ public class RefundJobs {
         this.refunds = refunds;
     }
 
-    /** Hỏi provider kết quả các lệnh đang bay. Với PayOS đây là đường DUY NHẤT (không có webhook lệnh chi). */
     @Scheduled(fixedDelayString = "${app.refund.poll-interval:PT10S}", initialDelayString = "PT10S")
     public void poll() {
         run("RefundPollJob", refunds::pollProcessing);
     }
 
-    /** Ví đủ tiền thì gửi tiếp hàng chờ AWAITING_FUNDS. */
     @Scheduled(fixedDelayString = "${app.refund.queue-interval:PT60S}", initialDelayString = "PT30S")
     public void queue() {
         run("RefundQueueJob", refunds::drainQueue);
     }
 
-    /** Lệnh REQUESTED kẹt (timeout lúc gửi, hoặc app chết giữa hai transaction). */
     @Scheduled(fixedDelayString = "${app.refund.recovery-interval:PT60S}", initialDelayString = "PT60S")
     public void recover() {
         run("RefundRecoveryJob", refunds::recoverStuck);

@@ -23,19 +23,11 @@ import java.util.stream.Collectors;
 import static com.example.demo.application.support.Texts.blankToNull;
 import static com.example.demo.application.support.Texts.parseUuid;
 
-/**
- * Hồ sơ ban tổ chức: tạo (đăng ký organizer / nâng cấp tài khoản), xem, sửa, trang public, danh sách nổi bật.
- * Controller: OrganizerController (/organizer/profile, /organizers, /organizers/{idOrSlug}); AuthService gọi {@link #create}.
- */
 @Service
 public class OrganizerServiceImpl implements OrganizerService {
 
     private static final int MAX_FEATURED = 24;
 
-    /**
-     * "BTC nổi bật": xác minh trước, rồi nhiều sự kiện sắp/đang diễn ra hơn, rồi theo tên; bỏ BTC không còn sự kiện nào.
-     * Cột "listed" = mọi sự kiện PUBLISHED/UPCOMING kể cả đã qua, cùng nghĩa eventsCount ở trang chi tiết BTC.
-     */
     private static final String FEATURED_SQL = """
             select o.id, count(*) as listed,
                    (select c.cover_image_url from events c
@@ -60,7 +52,6 @@ public class OrganizerServiceImpl implements OrganizerService {
         this.jdbc = jdbc;
     }
 
-    /** Tạo hồ sơ cho user, slug duy nhất sinh từ tên. Nơi gọi đã kiểm tra user chưa có hồ sơ. */
     @Override
     @Transactional
     public Organizer create(UUID userId, OrganizerProfileRequest req) {
@@ -85,7 +76,6 @@ public class OrganizerServiceImpl implements OrganizerService {
         return toResponse(organizers.saveAndFlush(o));
     }
 
-    /** Trang public: tìm theo slug trước, không thấy thì thử coi là UUID. */
     @Override
     @Transactional(readOnly = true)
     public OrganizerResponse publicProfile(String idOrSlug) {
@@ -94,15 +84,11 @@ public class OrganizerServiceImpl implements OrganizerService {
                 .orElseThrow(OrganizerServiceImpl::notFound);
     }
 
-    /**
-     * GET /organizers: BTC nổi bật cho trang chủ. size mặc định 12, kẹp vào [1, 24].
-     * Cố định 2 query (id + số sự kiện, rồi nạp entity theo lô), không N+1.
-     */
     @Override
     @Transactional(readOnly = true)
     public List<OrganizerResponse> featured(int size) {
         Map<UUID, Long> countById = new LinkedHashMap<>();
-        Map<UUID, String> coverById = new LinkedHashMap<>();   // ảnh sự kiện gần nhất, dự phòng khi BTC chưa có logo
+        Map<UUID, String> coverById = new LinkedHashMap<>();
         jdbc.sql(FEATURED_SQL).param("limit", Math.clamp(size, 1, MAX_FEATURED))
                 .query((rs, i) -> {
                     UUID id = rs.getObject("id", UUID.class);
@@ -114,7 +100,6 @@ public class OrganizerServiceImpl implements OrganizerService {
         if (countById.isEmpty()) return List.of();
         Map<UUID, Organizer> byId = organizers.findAllById(countById.keySet()).stream()
                 .collect(Collectors.toMap(Organizer::getId, Function.identity()));
-        // Giữ đúng thứ tự SQL (findAllById không đảm bảo thứ tự)
         return countById.entrySet().stream()
                 .map(en -> OrganizerResponse.from(byId.get(en.getKey()), en.getValue(), coverById.get(en.getKey())))
                 .toList();
@@ -130,12 +115,10 @@ public class OrganizerServiceImpl implements OrganizerService {
                 blankToNull(req.contactEmail()), blankToNull(req.contactPhone()));
     }
 
-    /** eventsCount = số sự kiện đang liệt kê, cùng con số với EventOrganizer.eventsCount ở trang chi tiết sự kiện. */
     private OrganizerResponse toResponse(Organizer o) {
         return OrganizerResponse.from(o, events.countByOrganizerIdAndStatusIn(o.getId(), EventStatus.LISTED), nextEventCover(o.getId()));
     }
 
-    /** Ảnh bìa sự kiện sắp diễn ra gần nhất của BTC (dự phòng cho avatar khi chưa có logo/ảnh bìa). */
     private String nextEventCover(UUID organizerId) {
         return jdbc.sql("""
                         select cover_image_url from events

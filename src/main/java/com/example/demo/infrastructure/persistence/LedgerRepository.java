@@ -19,7 +19,6 @@ public interface LedgerRepository extends JpaRepository<LedgerEntry, UUID> {
     long sumFor(@Param("account") LedgerAccount account, @Param("direction") LedgerDirection direction,
                 @Param("refType") String refType, @Param("refId") UUID refId);
 
-    /** Tổng tiền đã hoàn của một đơn: các vế DEBIT CUSTOMER_LIABILITY của mọi refund thuộc đơn đó. */
     @Query(value = """
             select coalesce(sum(l.amount), 0) from ledger_entries l
             join refunds r on r.id = l.ref_id

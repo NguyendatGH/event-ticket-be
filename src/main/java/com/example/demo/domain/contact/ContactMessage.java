@@ -11,7 +11,6 @@ import lombok.NoArgsConstructor;
 import java.time.Instant;
 import java.util.UUID;
 
-/** Tin nhắn từ trang Liên hệ. userId có khi người gửi đã đăng nhập. */
 @Entity
 @Table(name = "contact_messages")
 @Getter

@@ -16,7 +16,6 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Quy tắc thuần (không Spring, không DB) của sự kiện: khoảng ngày "when", slug, điều kiện publish, khóa giá/số lượng tier. */
 class EventRulesTest {
 
     private static final Instant NOW = Instant.parse("2026-09-30T03:00:00Z");
@@ -78,12 +77,12 @@ class EventRulesTest {
         TicketTier t = new TicketTier(UUID.randomUUID(), "GA", null, 100_000, 10, 4);
         assertEquals("TIER_PRICE_LOCKED",
                 assertThrows(DomainException.class, () -> t.update("GA", null, 90_000, 10, 4, 3)).getCode());
-        t.update("GA 2", null, 100_000, 12, 4, 3);   // giữ giá: đổi tên/số lượng được
+        t.update("GA 2", null, 100_000, 12, 4, 3);
         assertEquals("GA 2", t.getName());
 
-        Inventory inv = new Inventory(t.getId(), 7);   // total 10, đã bán/giữ 3
+        Inventory inv = new Inventory(t.getId(), 7);
         assertEquals("TIER_QUANTITY_BELOW_SOLD", assertThrows(DomainException.class, () -> inv.adjust(-8)).getCode());
-        inv.adjust(-7);                                // total 3 = đúng bằng số đã bán/giữ
+        inv.adjust(-7);
         assertEquals(0, inv.getAvailable());
         inv.adjust(5);
         assertEquals(5, inv.getAvailable());

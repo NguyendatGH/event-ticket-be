@@ -18,7 +18,6 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Không mạng: ký payload bằng chính thuật toán của SDK rồi verify qua adapter. */
 class PayOsPaymentGatewayTest {
 
     private static final String CHECKSUM = "test-checksum-key";
@@ -63,7 +62,7 @@ class PayOsPaymentGatewayTest {
         assertTrue(ev.success());
         assertEquals(6512000L, ev.amount());
         assertEquals("FT26267ABC", ev.transactionRef());
-        assertEquals(Instant.parse("2026-09-24T16:45:10Z"), ev.paidAt());   // 23:45:10 giờ VN
+        assertEquals(Instant.parse("2026-09-24T16:45:10Z"), ev.paidAt());
         assertEquals("970422", ev.payerBankBin());
         assertEquals("9876543210", ev.payerAccountNumber());
         assertSame(raw, ev.rawPayload());
@@ -73,7 +72,7 @@ class PayOsPaymentGatewayTest {
     void rejectsTamperedPayloadAndGarbage() throws Exception {
         Map<String, Object> data = data();
         String sig = new CryptoProviderImpl().createSignatureFromObj(data, CHECKSUM);
-        data.put("amount", 1000);   // đổi số tiền sau khi ký
+        data.put("amount", 1000);
 
         assertThrows(InvalidWebhookSignatureException.class, () -> gw.verifyAndParse(body(data, sig), Map.of()));
         assertThrows(DomainException.class, () -> gw.verifyAndParse("{\"hello\":1}", Map.of()));
@@ -85,11 +84,6 @@ class PayOsPaymentGatewayTest {
         assertEquals("short", PayOsPaymentGateway.truncate("short"));
     }
 
-    /**
-     * Không test nào khác load context với PayOS bật (@Profile("!test")), nên lỗi khiến Spring không dựng
-     * được bean này chỉ lộ ra lúc chạy thật. Dựng bean đúng kiểu Spring làm: đọc @Value, chọn constructor,
-     * và nối cả kênh chi (PayOsPayoutClient) — đổi bean graph mà quên chỗ nào thì test này đỏ.
-     */
     @Test
     void springBuildsTheBeanFromProperties() {
         try (var ctx = new AnnotationConfigApplicationContext()) {
@@ -104,11 +98,6 @@ class PayOsPaymentGatewayTest {
         }
     }
 
-    /**
-     * Hai dạng transactionDateTime PayOS thật sự trả về. Chuỗi ISO là bản ghi thật của đơn
-     * 1790667702053748 lấy từ GET /v2/payment-requests; trước bản vá nó ném và PaymentServiceImpl
-     * đọc thành "chưa trả" rồi hủy oan đơn đã thanh toán.
-     */
     @Test
     void parseTime_nhan_ca_dang_webhook_va_dang_iso_cua_rest() {
         assertEquals(Instant.parse("2026-09-24T16:45:10Z"),

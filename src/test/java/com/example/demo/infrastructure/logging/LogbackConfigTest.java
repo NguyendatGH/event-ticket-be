@@ -14,13 +14,11 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** logback-spring.xml phải load được và CONSOLE phải che message + in trace_id. */
 class LogbackConfigTest {
 
     @Test
     void consolePatternMasksMessageAndKeepsTraceId() throws Exception {
         LoggerContext ctx = new LoggerContext();
-        // Các biến Spring Boot bơm vào lúc chạy thật
         ctx.putProperty("LOG_CORRELATION_PATTERN", "[trace_id=%X{trace_id:-}] ");
         ctx.putProperty("APPLICATION_NAME", "[ticketing] ");
         JoranConfigurator configurator = new JoranConfigurator();
@@ -34,7 +32,7 @@ class LogbackConfigTest {
         PatternLayoutEncoder encoder = (PatternLayoutEncoder) console.getEncoder();
 
         LoggingEvent event = new LoggingEvent("x", ctx.getLogger("test"), Level.INFO, "password=secret1 acc 1234567890", null, null);
-        event.setMDCPropertyMap(Map.of("trace_id", "t-42"));   // context mới không có MDC adapter, gán thẳng
+        event.setMDCPropertyMap(Map.of("trace_id", "t-42"));
         String line = new String(encoder.encode(event), StandardCharsets.UTF_8);
 
         assertThat(line).contains("[trace_id=t-42]").contains("password=*** acc ******7890").doesNotContain("secret1");

@@ -11,7 +11,6 @@ import lombok.NoArgsConstructor;
 import java.time.Instant;
 import java.util.UUID;
 
-/** Token đặt lại mật khẩu, dùng một lần. Chỉ lưu sha256 hex. */
 @Entity
 @Table(name = "password_reset_tokens")
 @Getter

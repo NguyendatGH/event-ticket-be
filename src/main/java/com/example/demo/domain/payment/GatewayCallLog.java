@@ -13,7 +13,6 @@ import org.hibernate.type.SqlTypes;
 import java.time.Instant;
 import java.util.UUID;
 
-/** Audit mọi lần gọi provider (OUTBOUND) và mọi webhook đã verify (INBOUND). Không FK để ghi được kể cả khi nghiệp vụ rollback. */
 @Entity
 @Table(name = "gateway_call_logs")
 @Getter
@@ -23,7 +22,6 @@ public class GatewayCallLog {
     @Id
     private UUID id;
 
-    // Hiện luôn ref ORDER để admin audit tra theo order id; ref PAYMENT/REFUND khi cần
     @Column(name = "ref_type", length = 20)
     private String refType;
 
