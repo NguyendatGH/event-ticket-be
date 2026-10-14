@@ -13,6 +13,7 @@ import com.example.demo.domain.order.Order;
 import com.example.demo.domain.order.Ticket;
 import com.example.demo.domain.payment.BankBins;
 import com.example.demo.domain.payment.GatewayRejectedException;
+import com.example.demo.domain.payment.InvalidWebhookPayloadException;
 import com.example.demo.domain.payment.InvalidWebhookSignatureException;
 import com.example.demo.domain.payment.Payment;
 import com.example.demo.domain.payment.PaymentGatewayPort;
@@ -438,6 +439,10 @@ public class RefundService {
             e = gateway.verifyAndParseRefund(rawBody, headers);
         } catch (InvalidWebhookSignatureException ex) {
             tx.executeWithoutResult(s -> webhookEvents.save(WebhookEvent.rejected(provider, audit.jsonOrWrapped(rawBody))));
+            throw ex;
+        } catch (InvalidWebhookPayloadException ex) {
+            tx.executeWithoutResult(s -> webhookEvents.save(
+                    WebhookEvent.invalidPayload(provider, "refund", audit.jsonOrWrapped(rawBody))));
             throw ex;
         }
         WebhookEvent saved;

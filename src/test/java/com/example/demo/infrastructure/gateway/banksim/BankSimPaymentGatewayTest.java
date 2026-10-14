@@ -1,6 +1,7 @@
 package com.example.demo.infrastructure.gateway.banksim;
 
 import com.example.demo.domain.payment.GatewayRejectedException;
+import com.example.demo.domain.payment.InvalidWebhookPayloadException;
 import com.example.demo.domain.payment.InvalidWebhookSignatureException;
 import com.example.demo.domain.payment.PaymentEvent;
 import com.example.demo.domain.payment.RefundCommand;
@@ -71,6 +72,45 @@ class BankSimPaymentGatewayTest {
                 {"gwTxnId":"TradeNo000003","orderCode":1,"success":true,"amount":1}""";
         assertThrows(InvalidWebhookSignatureException.class,
                 () -> gateway.verifyAndParse(body, Map.of("x-mock-signature", "deadbeef")));
+    }
+
+    @Test
+    void webhookWithMissingOrBadFieldsIsRejectedInsteadOfGuessingDefaults() {
+        String ok = """
+                {"eventId":"TradeNo000004:02","gwTxnId":"TradeNo000004","orderCode":"125","success":true,
+                 "amount":100000,"paidAt":"2026-10-08T03:00:00Z"}""";
+        assertEquals(125, parse(ok).orderCode());
+
+        for (String bad : new String[] {
+                ok.replace("\"eventId\":\"TradeNo000004:02\",", ""),        // thiếu eventId
+                ok.replace("\"success\":true,", ""),                           // thiếu success
+                ok.replace("\"success\":true", "\"success\":\"true\""),        // success dạng chuỗi
+                ok.replace("2026-10-08T03:00:00Z", "14/10/2026"),              // paidAt sai định dạng
+                ok.replace("100000", "\"abc\""),                               // amount không phải số
+                ok.replace("100000", "-5000"),                                 // amount âm
+                ok.replace("100000", "0"),                                     // thành công mà 0 đồng
+                ok.replace("\"125\"", "\"abc\"") }) {                          // orderCode không phải số
+            assertThrows(InvalidWebhookPayloadException.class, () -> parse(bad), bad);
+        }
+    }
+
+    @Test
+    void failedQrWebhookWithZeroAmountIsStillAccepted() {
+        PaymentEvent e = parse("""
+                {"eventId":"TradeNo000005:BSFAILED1","providerPaymentId":"TradeNo000005","gwTxnId":"TradeNo000005",
+                 "orderCode":126,"success":false,"amount":0,"transactionRef":"BSFAILED1","status":"CANCELLED"}""");
+        assertFalse(e.success());
+        assertNull(e.paidAt());
+    }
+
+    @Test
+    void refundWebhookWithUnknownStateIsRejected() {
+        when(credentials.forProviderRefundId(any()))
+                .thenReturn(new GatewayCredentialResolver.GatewayMerchantContext("MerNo000001", SECRET));
+        String body = """
+                {"eventId":"RF1:DONE","providerRefundId":"RF1","referenceId":"ref-1","state":"DONE"}""";
+        assertThrows(InvalidWebhookPayloadException.class,
+                () -> gateway.verifyAndParseRefund(body, Map.of("x-mock-signature", sign(body))));
     }
 
     @Test

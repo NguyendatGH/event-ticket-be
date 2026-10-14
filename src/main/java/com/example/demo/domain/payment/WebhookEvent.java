@@ -66,6 +66,14 @@ public class WebhookEvent {
         return w;
     }
 
+    /** Chữ ký đúng nhưng nội dung sai: lưu lại để còn dấu vết. Dùng FAILED vì CHECK của cột chưa có giá trị riêng. */
+    public static WebhookEvent invalidPayload(PaymentProvider provider, String eventType, String rawPayload) {
+        WebhookEvent w = received(provider, "invalid:" + UUID.randomUUID(), eventType, rawPayload);
+        w.processingResult = WebhookProcessingResult.FAILED;
+        w.processedAt = w.receivedAt;
+        return w;
+    }
+
     public void finish(WebhookProcessingResult result) {
         processingResult = result;
         processedAt = Instant.now();

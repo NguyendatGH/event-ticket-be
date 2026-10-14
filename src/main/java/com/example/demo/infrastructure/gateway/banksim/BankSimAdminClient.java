@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
+import java.time.Duration;
 import java.util.List;
 
 @Component
@@ -26,7 +27,7 @@ public class BankSimAdminClient {
         this.adminKey = adminKey == null ? "" : adminKey;
         this.webhookUrl = webhookUrl == null || webhookUrl.isBlank() ? null : webhookUrl;
         java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
-                .connectTimeout(java.time.Duration.ofSeconds(3)).build();
+                .connectTimeout(Duration.ofSeconds(3)).build();
         org.springframework.http.client.JdkClientHttpRequestFactory factory =
                 new org.springframework.http.client.JdkClientHttpRequestFactory(client);
         factory.setReadTimeout(java.time.Duration.ofSeconds(15));

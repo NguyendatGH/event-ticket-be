@@ -12,6 +12,7 @@ import com.example.demo.domain.common.DomainException;
 import com.example.demo.domain.common.LogContext;
 import com.example.demo.domain.order.Order;
 import com.example.demo.domain.order.OrderStatus;
+import com.example.demo.domain.payment.InvalidWebhookPayloadException;
 import com.example.demo.domain.payment.InvalidWebhookSignatureException;
 import com.example.demo.domain.payment.Payment;
 import com.example.demo.domain.payment.PaymentEvent;
@@ -81,6 +82,10 @@ public class PaymentServiceImpl implements PaymentService {
             } catch (InvalidWebhookSignatureException ex) {
                 log.warn("Webhook {} sai chữ ký", provider);
                 tx.executeWithoutResult(s -> webhookEvents.save(WebhookEvent.rejected(provider, audit.jsonOrWrapped(rawBody))));
+                throw ex;
+            } catch (InvalidWebhookPayloadException ex) {
+                tx.executeWithoutResult(s -> webhookEvents.save(
+                        WebhookEvent.invalidPayload(provider, "payment", audit.jsonOrWrapped(rawBody))));
                 throw ex;
             }
             LogContext.orderCode(event.orderCode());

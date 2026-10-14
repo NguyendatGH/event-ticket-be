@@ -4,6 +4,7 @@ import com.example.demo.domain.common.LogContext;
 import com.example.demo.domain.payment.CreatePaymentCommand;
 import com.example.demo.domain.payment.GatewayRejectedException;
 import com.example.demo.domain.payment.GatewayTimeoutException;
+import com.example.demo.domain.payment.InvalidWebhookPayloadException;
 import com.example.demo.domain.payment.InvalidWebhookSignatureException;
 import com.example.demo.domain.payment.PaymentEvent;
 import com.example.demo.domain.payment.PaymentGatewayPort;
@@ -130,11 +131,18 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
     @Override
     public PaymentEvent verifyAndParse(String rawBody, Map<String, String> headers) {
         requireSignature(rawBody, headers);
+        // Chữ ký đúng mới kiểm nội dung. Thiếu/sai field bắt buộc thì từ chối, không đoán giá trị mặc định:
+        // thiếu eventId mà lưu "" thì mọi webhook thiếu eventId sau đó bị coi là trùng; thiếu success mà đọc
+        // thành false thì đơn đang chờ bị đánh dấu thất bại.
         JsonNode n = json.readTree(rawBody);
-        String paidAt = n.path("paidAt").asText();
-        return new PaymentEvent(n.path("eventId").asText(), paymentIdOf(n), n.path("orderCode").asLong(),
-                n.path("success").asBoolean(), n.path("amount").asLong(), n.path("transactionRef").asText(),
-                paidAt.isBlank() ? null : Instant.parse(paidAt), textOrNull(n, "payerBankBin"),
+        String eventId = requireText(n, "eventId");
+        long orderCode = requireLong(n, "orderCode");
+        boolean success = requireBoolean(n, "success");
+        long amount = requireLong(n, "amount");
+        if (amount < 0 || (success && amount == 0))
+            throw invalidPayload("amount = " + amount + " không hợp lệ (thành công thì phải > 0, không được âm)");
+        return new PaymentEvent(eventId, paymentIdOf(n), orderCode, success, amount, n.path("transactionRef").asText(),
+                optionalInstant(n, "paidAt"), textOrNull(n, "payerBankBin"),
                 textOrNull(n, "payerAccountNumber"), rawBody);
     }
 
@@ -281,9 +289,17 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
     public RefundEvent verifyAndParseRefund(String rawBody, Map<String, String> headers) {
         JsonNode n = json.readTree(rawBody);
         requireRefundSignature(rawBody, headers, n);
-        return new RefundEvent(n.path("eventId").asText(), n.path("providerRefundId").asText(),
+        String eventId = requireText(n, "eventId");
+        String state = requireText(n, "state");
+        RefundStatusResult.Status status;
+        try {
+            status = RefundStatusResult.Status.valueOf(state);
+        } catch (IllegalArgumentException ex) {
+            throw invalidPayload("state = " + state + " không phải trạng thái refund hợp lệ");
+        }
+        return new RefundEvent(eventId, n.path("providerRefundId").asText(),
                 n.path("referenceId").asText(),
-                RefundStatusResult.Status.valueOf(n.path("state").asText()),
+                status,
                 n.path("failureCode").isNull() ? null : n.path("failureCode").asText(),
                 n.path("failureReason").isNull() ? null : n.path("failureReason").asText(), rawBody);
     }
@@ -336,6 +352,47 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
     private static String textOrNull(JsonNode n, String field) {
         String value = n.path(field).asText(null);
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static String requireText(JsonNode n, String field) {
+        String value = textOrNull(n, field);
+        if (value == null)
+            throw invalidPayload("thiếu " + field);
+        return value;
+    }
+
+    /** Nhận số nguyên hoặc chuỗi toàn chữ số (webhook thẻ gửi orderCode dạng chuỗi, QR gửi dạng số). */
+    private static long requireLong(JsonNode n, String field) {
+        JsonNode v = n.path(field);
+        if (v.isIntegralNumber() && v.canConvertToLong())
+            return v.asLong();
+        if (v.isTextual() && v.asText().matches("-?[0-9]{1,18}"))
+            return Long.parseLong(v.asText());
+        throw invalidPayload(field + (v.isMissingNode() || v.isNull() ? " bị thiếu" : " không phải số nguyên"));
+    }
+
+    private static boolean requireBoolean(JsonNode n, String field) {
+        JsonNode v = n.path(field);
+        if (!v.isBoolean())
+            throw invalidPayload(field + (v.isMissingNode() || v.isNull() ? " bị thiếu" : " không phải true/false"));
+        return v.asBoolean();
+    }
+
+    /** Field tuỳ chọn: thiếu/null thì null, có mà sai định dạng ISO-8601 thì từ chối. */
+    private static Instant optionalInstant(JsonNode n, String field) {
+        String value = textOrNull(n, field);
+        if (value == null)
+            return null;
+        try {
+            return Instant.parse(value);
+        } catch (java.time.format.DateTimeParseException ex) {
+            throw invalidPayload(field + " = " + value + " không đúng định dạng ISO-8601");
+        }
+    }
+
+    private static InvalidWebhookPayloadException invalidPayload(String reason) {
+        log.warn("Webhook đúng chữ ký nhưng nội dung không hợp lệ: {}", reason);
+        return new InvalidWebhookPayloadException("Nội dung webhook BankSim không hợp lệ: " + reason);
     }
 
     private String secretForWebhook(String rawBody) {
