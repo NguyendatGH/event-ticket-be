@@ -18,6 +18,7 @@ import com.example.demo.domain.payment.Payment;
 import com.example.demo.domain.payment.PaymentEvent;
 import com.example.demo.domain.payment.PaymentGatewayPort;
 import com.example.demo.domain.payment.PaymentProvider;
+import com.example.demo.domain.payment.PaymentStatus;
 import com.example.demo.domain.payment.PaymentStatusResult;
 import com.example.demo.domain.payment.WebhookEvent;
 import com.example.demo.domain.payment.WebhookProcessingResult;
@@ -138,7 +139,7 @@ public class PaymentServiceImpl implements PaymentService {
             } else {
                 result = IGNORED;
             }
-        } else if (order.isPending() && payment.getStatus() == com.example.demo.domain.payment.PaymentStatus.OVERPAID) {
+        } else if (order.isPending() && payment.getStatus() == PaymentStatus.OVERPAID) {
             log.warn("Order {} đã nhận OVERPAID; giữ nguyên để manual review, không tự động settle lại", order.getOrderCode());
             result = IGNORED;
         } else if (order.isPending()) {

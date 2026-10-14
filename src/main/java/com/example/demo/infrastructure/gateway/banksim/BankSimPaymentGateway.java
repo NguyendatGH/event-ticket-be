@@ -1,5 +1,6 @@
 package com.example.demo.infrastructure.gateway.banksim;
 
+import com.example.demo.domain.common.DomainException;
 import com.example.demo.domain.common.LogContext;
 import com.example.demo.domain.payment.CreatePaymentCommand;
 import com.example.demo.domain.payment.GatewayRejectedException;
@@ -20,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpRequest;
 import org.springframework.http.client.BufferingClientHttpRequestFactory;
 import org.springframework.http.client.ClientHttpRequestExecution;
@@ -34,12 +36,17 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.HexFormat;
 
 @Component
@@ -52,7 +59,7 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
     private final BankSimMerchantClient merchantApi;
     private final ObjectMapper json;
     private volatile SupportedBins supportedBins;
-    private final Map<java.util.UUID, CachedMethods> supportedMethods = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<UUID, CachedMethods> supportedMethods = new ConcurrentHashMap<>();
 
     public BankSimPaymentGateway(@Value("${app.bank-simulate.base-url}") String baseUrl,
             GatewayCredentialResolver credentials,
@@ -131,9 +138,6 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
     @Override
     public PaymentEvent verifyAndParse(String rawBody, Map<String, String> headers) {
         requireSignature(rawBody, headers);
-        // Chữ ký đúng mới kiểm nội dung. Thiếu/sai field bắt buộc thì từ chối, không đoán giá trị mặc định:
-        // thiếu eventId mà lưu "" thì mọi webhook thiếu eventId sau đó bị coi là trùng; thiếu success mà đọc
-        // thành false thì đơn đang chờ bị đánh dấu thất bại.
         JsonNode n = json.readTree(rawBody);
         String eventId = requireText(n, "eventId");
         long orderCode = requireLong(n, "orderCode");
@@ -151,7 +155,7 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
         GatewayCredentialResolver.GatewayMerchantContext ctx;
         try {
             ctx = credentials.forRefundReference(c.referenceId());
-        } catch (com.example.demo.domain.common.DomainException ex) {
+        } catch (DomainException ex) {
             throw new GatewayRejectedException(ex.getCode(), ex.getMessage());
         }
         try {
@@ -229,9 +233,9 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
         try {
             SupportedBanksResponse response = http.get().uri("/api/v1/gateway/banks").retrieve()
                     .body(SupportedBanksResponse.class);
-            java.util.Set<String> bins = response == null || response.bins() == null
-                    ? java.util.Set.of()
-                    : java.util.Set.copyOf(response.bins());
+            Set<String> bins = response == null || response.bins() == null
+                    ? Set.of()
+                    : Set.copyOf(response.bins());
             log.info("banksim chi được tới {} BIN: {}", bins.size(), bins);
             supportedBins = new SupportedBins(Optional.of(bins), Instant.now());
         } catch (RuntimeException ex) {
@@ -242,7 +246,7 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
     }
 
     @Override
-    public java.util.Optional<java.util.Set<String>> supportedPaymentMethods(java.util.UUID organizerId) {
+    public Optional<Set<String>> supportedPaymentMethods(UUID organizerId) {
         if (organizerId == null)
             return Optional.empty();
         CachedMethods cached = supportedMethods.get(organizerId);
@@ -251,35 +255,35 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
         GatewayCredentialResolver.GatewayMerchantContext ctx;
         try {
             ctx = credentials.forOrganizer(organizerId);
-        } catch (com.example.demo.domain.common.DomainException ex) {
+        } catch (DomainException ex) {
             log.info("organizer={} chưa có merchant banksim dùng được ({}), chưa lọc phương thức", organizerId,
                     ex.getCode());
             return Optional.empty();
         }
-        Optional<java.util.Set<String>> methods;
+        Optional<Set<String>> methods;
         try {
             methods = Optional.of(java.util.Set.copyOf(merchantApi.paymentMethods(ctx)));
             log.info("organizer={} banksim trả được {}", organizerId, methods.get());
-        } catch (com.example.demo.domain.common.DomainException ex) {
+        } catch (DomainException ex) {
             boolean refused = ex.getStatus().is4xxClientError();
             log.warn("organizer={} gateway {} khi hỏi phương thức ({})", organizerId, refused ? "từ chối" : "lỗi",
                     ex.getCode());
-            methods = refused ? Optional.of(java.util.Set.of()) : Optional.empty();
+            methods = refused ? Optional.of(Set.of()) : Optional.empty();
         }
         supportedMethods.put(organizerId, new CachedMethods(methods, Instant.now()));
         return methods;
     }
 
     @Override
-    public void forgetPaymentMethods(java.util.UUID organizerId) {
+    public void forgetPaymentMethods(UUID organizerId) {
         if (organizerId != null)
             supportedMethods.remove(organizerId);
     }
 
-    private record CachedMethods(Optional<java.util.Set<String>> methods, Instant freshAt) {
+    private record CachedMethods(Optional<Set<String>> methods, Instant freshAt) {
     }
 
-    private record SupportedBins(java.util.Optional<java.util.Set<String>> bins, Instant freshAt) {
+    private record SupportedBins(Optional<Set<String>> bins, Instant freshAt) {
     }
 
     private record SupportedBanksResponse(List<String> bins) {
@@ -339,7 +343,7 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
         return http.post().uri(path, vars).headers(h -> headers(h, c));
     }
 
-    private void headers(org.springframework.http.HttpHeaders h, GatewayCredentialResolver.GatewayMerchantContext c) {
+    private void headers(HttpHeaders h, GatewayCredentialResolver.GatewayMerchantContext c) {
         h.set("X-Merchant-No", c.merchantNo());
         h.set("X-Merchant-Secret", c.secret());
     }
@@ -361,13 +365,12 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
         return value;
     }
 
-    /** Nhận số nguyên hoặc chuỗi toàn chữ số (webhook thẻ gửi orderCode dạng chuỗi, QR gửi dạng số). */
     private static long requireLong(JsonNode n, String field) {
         JsonNode v = n.path(field);
         if (v.isIntegralNumber() && v.canConvertToLong())
             return v.asLong();
-        if (v.isTextual() && v.asText().matches("-?[0-9]{1,18}"))
-            return Long.parseLong(v.asText());
+        if (v.isString() && v.asString().matches("-?[0-9]{1,18}"))
+            return Long.parseLong(v.asString());
         throw invalidPayload(field + (v.isMissingNode() || v.isNull() ? " bị thiếu" : " không phải số nguyên"));
     }
 
@@ -378,14 +381,13 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
         return v.asBoolean();
     }
 
-    /** Field tuỳ chọn: thiếu/null thì null, có mà sai định dạng ISO-8601 thì từ chối. */
     private static Instant optionalInstant(JsonNode n, String field) {
         String value = textOrNull(n, field);
         if (value == null)
             return null;
         try {
             return Instant.parse(value);
-        } catch (java.time.format.DateTimeParseException ex) {
+        } catch (DateTimeParseException ex) {
             throw invalidPayload(field + " = " + value + " không đúng định dạng ISO-8601");
         }
     }
@@ -460,7 +462,7 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
             return mac.doFinal(rawBody.getBytes(StandardCharsets.UTF_8));
-        } catch (java.security.GeneralSecurityException ex) {
+        } catch (GeneralSecurityException ex) {
             throw new IllegalStateException("Cannot verify BankSim HMAC", ex);
         }
     }

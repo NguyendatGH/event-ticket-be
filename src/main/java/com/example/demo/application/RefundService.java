@@ -24,7 +24,6 @@ import com.example.demo.domain.payment.RefundStatusResult;
 import com.example.demo.domain.payment.RefundSubmitResult;
 import com.example.demo.domain.payment.WebhookEvent;
 import com.example.demo.domain.payment.WebhookProcessingResult;
-import com.example.demo.application.PaymentGatewayRegistry;
 import com.example.demo.domain.refund.Refund;
 import com.example.demo.domain.refund.RefundInitiator;
 import com.example.demo.domain.refund.RefundItem;
