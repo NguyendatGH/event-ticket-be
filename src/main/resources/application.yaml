@@ -85,11 +85,9 @@ app:
     google:
       client-id: ${GOOGLE_CLIENT_ID:}
   mail:
-    enabled: ${MAIL_ENABLED:true}                                    # false = chỉ log nội dung mail, không gọi SMTP (test/dev không cần mạng)
-    from: ${MY_EMAIL:}                                               # rỗng = chưa cấu hình: Mailer log.warn rồi bỏ qua, app vẫn chạy
-    organizer-refunds-url: http://localhost:3000/organizer/refunds   # link trong mail trỏ về FE (port 3000, giống app.auth.reset-password-url)
-    # Link trang đơn cho mail gửi KHÁCH. {orderId} là chỗ RefundNotifier thay bằng id đơn thật.
-    # Route lấy từ FE: fe/src/app/router.jsx khai "orders/:id" -> /orders/<uuid>.
+    enabled: ${MAIL_ENABLED:true}                                  
+    from: ${MY_EMAIL:}                                             
+    organizer-refunds-url: http://localhost:3000/organizer/refunds 
     order-url-template: http://localhost:3000/orders/{orderId}
   storage:
     local-dir: uploads            
@@ -108,7 +106,6 @@ app:
     cancel-url: http://localhost:3000/checkout/cancel
     default-gateway: ${PAYMENT_DEFAULT_GATEWAY:PAYOS}
   reconciliation:
-    # Đối soát sổ với ví. Chỉ đọc và log; lệch là có người phải xem.
     interval: ${RECONCILIATION_INTERVAL:PT10M}
   refund:
     fee-percent: ${REFUND_FEE_PERCENT:0}  
