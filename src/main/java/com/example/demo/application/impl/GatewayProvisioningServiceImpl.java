@@ -6,28 +6,28 @@ import com.example.demo.domain.common.DomainException;
 import com.example.demo.domain.gateway.OrganizerGatewayBinding;
 import com.example.demo.domain.organizer.Organizer;
 import com.example.demo.domain.payment.MerchantGateway;
-import com.example.demo.domain.payment.OrganizerBankAccount;
 import com.example.demo.infrastructure.gateway.banksim.BankSimAdminClient;
-import com.example.demo.infrastructure.gateway.banksim.BankSimAdminClient.SettlementAccount;
 import com.example.demo.infrastructure.gateway.banksim.GatewaySecretCipher;
-import com.example.demo.infrastructure.persistence.OrganizerBankAccountRepository;
 import com.example.demo.infrastructure.persistence.OrganizerGatewayBindingRepository;
 import com.example.demo.infrastructure.persistence.OrganizerRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -42,14 +42,13 @@ public class GatewayProvisioningServiceImpl implements GatewayProvisioningServic
     private final BankSimAdminClient admin;
     private final GatewaySecretCipher cipher;
     private final TransactionTemplate tx;
-    private final OrganizerBankAccountRepository payoutAccounts;
     private final PaymentGatewayRegistry gateways;
     private final MerchantGateway configuredDefault;
     private final JdbcClient jdbc;
 
     public GatewayProvisioningServiceImpl(OrganizerGatewayBindingRepository bindings, OrganizerRepository organizers,
                                           BankSimAdminClient admin, GatewaySecretCipher cipher, TransactionTemplate tx,
-                                          OrganizerBankAccountRepository payoutAccounts, PaymentGatewayRegistry gateways,
+                                          PaymentGatewayRegistry gateways,
                                           @Value("${app.payment.default-gateway:PAYOS}") MerchantGateway configuredDefault,
                                           JdbcClient jdbc) {
         this.bindings = bindings;
@@ -57,7 +56,6 @@ public class GatewayProvisioningServiceImpl implements GatewayProvisioningServic
         this.admin = admin;
         this.cipher = cipher;
         this.tx = tx;
-        this.payoutAccounts = payoutAccounts;
         this.gateways = gateways;
         this.configuredDefault = configuredDefault;
         this.jdbc = jdbc;
@@ -82,16 +80,17 @@ public class GatewayProvisioningServiceImpl implements GatewayProvisioningServic
     @Override
     public int provisionMissing() {
         if (!enabled()) return 0;
-        List<UUID> missing = jdbc.sql("""
+        Set<UUID> todo = new LinkedHashSet<>(jdbc.sql("""
                         SELECT o.id FROM organizers o
                         LEFT JOIN organizer_gateway_bindings b ON b.organizer_id = o.id AND b.provider = 'BANKSIM'
                         WHERE b.id IS NULL OR b.status = 'FAILED' OR (b.status = 'PENDING' AND b.updated_at < :staleBefore)
                         ORDER BY o.created_at
                         """)
                 .param("staleBefore", Timestamp.from(Instant.now().minus(PENDING_STALE_AFTER)))
-                .query((rs, n) -> rs.getObject(1, UUID.class)).list();
+                .query((rs, n) -> rs.getObject(1, UUID.class)).list());
+        todo.addAll(orphanedOrganizers());
         int provisioned = 0;
-        for (UUID organizerId : missing) {
+        for (UUID organizerId : todo) {
             try {
                 ensureProvisioned(organizerId, BANKSIM);
                 provisioned++;
@@ -102,54 +101,34 @@ public class GatewayProvisioningServiceImpl implements GatewayProvisioningServic
         return provisioned;
     }
 
-    @Override
-    public int syncPendingSettlements() {
-        if (!enabled()) return 0;
-        int synced = 0;
-        for (OrganizerBankAccount a : payoutAccounts.findByIsDefaultTrueAndGatewaySyncedAtIsNull()) {
-            if (!pushable(a)) continue;
-            try {
-                syncSettlement(a.getOrganizerId(), new SettlementAccount(a.getBankBin(), a.getAccountNumber(), a.getAccountName()));
-                synced++;
-            } catch (RuntimeException ex) {
-                log.warn("[GATEWAY-PROVISION] organizer={} chưa đẩy được tài khoản nhận tiền: {}", a.getOrganizerId(), ex.toString());
-            }
+    private List<UUID> orphanedOrganizers() {
+        Map<String, String> onGateway = new HashMap<>();
+        try {
+            for (BankSimAdminClient.MerchantListItem m : admin.listMerchants())
+                onGateway.put(m.merNo(), m.externalReference());
+        } catch (RuntimeException ex) {
+            log.warn("[GATEWAY-PROVISION] không lấy được danh sách merchant của gateway, bỏ qua bước tự lành: {}", ex.toString());
+            return List.of();
         }
-        return synced;
+        record Row(UUID organizerId, String merNo, String reference) {}
+        List<Row> active = jdbc.sql("""
+                        SELECT organizer_id, gateway_merchant_no, external_reference FROM organizer_gateway_bindings
+                        WHERE provider = 'BANKSIM' AND status = 'ACTIVE'
+                        """)
+                .query((rs, n) -> new Row(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3))).list();
+        return active.stream().filter(r -> {
+            if (!onGateway.containsKey(r.merNo())) return true;
+            String reference = onGateway.get(r.merNo());
+            return reference != null && r.reference() != null && !reference.equals(r.reference());
+        }).map(Row::organizerId).toList();
     }
 
     @Override
     public OrganizerGatewayBinding ensureProvisioned(UUID organizerId, String provider) {
-        SettlementAccount stored = payoutAccounts.findFirstByOrganizerIdAndIsDefaultTrue(organizerId)
-                .filter(GatewayProvisioningServiceImpl::pushable)
-                .map(a -> new SettlementAccount(a.getBankBin(), a.getAccountNumber(), a.getAccountName()))
-                .orElse(null);
-        return provision(organizerId, provider, stored);
+        return provision(organizerId, provider);
     }
 
-    private static boolean pushable(OrganizerBankAccount account) {
-        return account.getBankBin() != null && account.getAccountNumber() != null && !account.getAccountNumber().isBlank();
-    }
-
-    @Override
-    public void syncSettlement(UUID organizerId, SettlementAccount account) {
-        if (!admin.isConfigured()) {
-            log.warn("[GATEWAY-PROVISION] organizer={} chưa cấu hình BANK_SIMULATE_ADMIN_KEY -> chưa đẩy được tài khoản"
-                    + " nhận tiền lên gateway, BTC chưa nhận thanh toán được", organizerId);
-            return;
-        }
-        OrganizerGatewayBinding existing = bindings.findByOrganizerIdAndProvider(organizerId, BANKSIM).orElse(null);
-        if (existing != null && existing.isUsable() && stillOnGateway(existing)) {
-            admin.updateSettlement(existing.getGatewayMerchantNo(), account);
-            markSynced(organizerId, account);
-            log.info("[GATEWAY-PROVISION] organizer={} merchantNo={} đổi tài khoản nhận tiền -> {} {}",
-                    organizerId, existing.getGatewayMerchantNo(), account.bankBin(), mask(account.accountNumber()));
-            return;
-        }
-        provision(organizerId, BANKSIM, account);
-    }
-
-    private OrganizerGatewayBinding provision(UUID organizerId, String provider, SettlementAccount settlement) {
+    private OrganizerGatewayBinding provision(UUID organizerId, String provider) {
         if (!BANKSIM.equals(provider))
             throw DomainException.badRequest("PROVIDER_NOT_PROVISIONABLE", "Chỉ BankSim cần cấp phát merchant riêng");
 
@@ -168,20 +147,16 @@ public class GatewayProvisioningServiceImpl implements GatewayProvisioningServic
         log.info("[GATEWAY-PROVISION] organizer={} name='{}' bắt đầu cấp phát trên {}",
                 organizerId, organizer.getName(), provider);
         try {
-            Optional<Provisioned> adopted = adopt(organizerId, externalReference);
-            if (adopted.isPresent() && settlement != null)
-                admin.updateSettlement(adopted.get().merchantNo(), settlement);
-            Provisioned result = adopted.orElseGet(() -> onboard(organizerId, organizer.getName(), externalReference, settlement));
+            Provisioned result = adopt(organizerId, externalReference)
+                    .orElseGet(() -> onboard(organizerId, organizer.getName(), externalReference));
             String encryptedSecret = cipher.encrypt(result.merchantSecret());
             OrganizerGatewayBinding active = tx.execute(s -> {
                 OrganizerGatewayBinding b = bindings.findById(bindingId).orElseThrow();
                 if (b.getStatus() != OrganizerGatewayBinding.Status.PENDING) return b;
-                b.activate(result.merchantNo(), result.terminalId(), encryptedSecret);
+                b.activate(result.merchantNo(), encryptedSecret);
                 return bindings.saveAndFlush(b);
             });
-            if (settlement != null) markSynced(organizerId, settlement);
-            log.info("[GATEWAY-PROVISION] organizer={} -> merchantNo={} terminalId={} settlement={}",
-                    organizerId, result.merchantNo(), result.terminalId(), settlement == null ? "chưa khai" : "đã gửi");
+            log.info("[GATEWAY-PROVISION] organizer={} -> merchantNo={}", organizerId, result.merchantNo());
             return active;
         } catch (RuntimeException ex) {
             tx.executeWithoutResult(s -> bindings.findById(bindingId)
@@ -220,32 +195,20 @@ public class GatewayProvisioningServiceImpl implements GatewayProvisioningServic
                 .findFirst().orElse(null);
         if (merNo == null) return Optional.empty();
 
-        String terminalId = activeTerminalOf(merNo);
         String secret = admin.rotateCredential(merNo) instanceof Map<?, ?> m && m.get("merchantSecret") != null
                 ? m.get("merchantSecret").toString() : null;
         if (secret == null)
             throw DomainException.conflict("GATEWAY_ADMIN_REJECTED", "Gateway rotate không trả về merchantSecret");
         log.warn("[GATEWAY-PROVISION] organizer={} gateway đã có merchantNo={} (reference {}) -> nhận lại, rotate secret",
                 organizerId, merNo, externalReference);
-        return Optional.of(new Provisioned(merNo, terminalId, secret));
+        return Optional.of(new Provisioned(merNo, secret));
     }
 
-    private Provisioned onboard(UUID organizerId, String name, String externalReference, SettlementAccount settlement) {
-        BankSimAdminClient.Onboarded result = admin.onboard(name, externalReference, null, null, settlement);
+    private Provisioned onboard(UUID organizerId, String name, String externalReference) {
+        BankSimAdminClient.Onboarded result = admin.onboard(name, externalReference, null, null);
         log.info("[GATEWAY-PROVISION] organizer={} onboard mới merchantNo={} routing={} methods={}",
                 organizerId, result.merchantNo(), result.routingProfileCode(), result.paymentMethods());
-        return new Provisioned(result.merchantNo(), result.terminalId(), result.merchantSecret());
-    }
-
-    private String activeTerminalOf(String merNo) {
-        if (admin.terminals(merNo) instanceof List<?> terminals) {
-            for (Object t : terminals) {
-                if (t instanceof Map<?, ?> m && "ACTIVE".equals(String.valueOf(m.get("status"))))
-                    return String.valueOf(m.get("terminalId"));
-            }
-        }
-        throw DomainException.conflict("GATEWAY_TERMINAL_MISSING",
-                "Merchant " + merNo + " trên gateway không có terminal ACTIVE nào. Admin cần bật hoặc tạo terminal rồi cấp phát lại.");
+        return new Provisioned(result.merchantNo(), result.merchantSecret());
     }
 
     private boolean stillOnGateway(OrganizerGatewayBinding binding) {
@@ -265,14 +228,5 @@ public class GatewayProvisioningServiceImpl implements GatewayProvisioningServic
         }
     }
 
-    private void markSynced(UUID organizerId, SettlementAccount account) {
-        tx.executeWithoutResult(s -> payoutAccounts.markSynced(organizerId, account.bankBin(), account.accountNumber(),
-                Instant.now()));
-    }
-
-    private static String mask(String accountNumber) {
-        return accountNumber == null ? null : "••••" + accountNumber.substring(Math.max(0, accountNumber.length() - 4));
-    }
-
-    private record Provisioned(String merchantNo, String terminalId, String merchantSecret) {}
+    private record Provisioned(String merchantNo, String merchantSecret) {}
 }

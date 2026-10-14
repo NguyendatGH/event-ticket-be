@@ -31,30 +31,17 @@ public class GatewayCredentialResolver {
                 .orElseThrow(() -> notProvisioned("ban tổ chức chưa được cấp phát trên BankSim"));
         if (!binding.isUsable())
             throw notProvisioned("binding đang ở trạng thái " + binding.getStatus());
-        return new GatewayMerchantContext(binding.getGatewayMerchantNo(), binding.getGatewayTerminalId(),
-                cipher.decrypt(binding.getEncryptedMerchantSecret()));
-    }
-
-    public java.util.List<String> channelTerminals(UUID organizerId) {
-        return jdbc.sql("""
-                        SELECT gateway_terminal_id FROM organizer_payment_channels
-                        WHERE organizer_id = ? AND status = 'ACTIVE' ORDER BY opened_at
-                        """)
-                .param(organizerId).query(String.class).list();
+        return contextOf(binding);
     }
 
     public GatewayMerchantContext forProviderPaymentId(String providerPaymentId) {
         if (providerPaymentId == null || providerPaymentId.isBlank())
             throw notProvisioned("thiếu providerPaymentId");
-        var row = jdbc.sql("SELECT gateway_merchant_no, gateway_terminal_id FROM payments WHERE provider_payment_id = ?")
-                .param(providerPaymentId)
-                .query((rs, n) -> new String[]{rs.getString(1), rs.getString(2)})
-                .optional().orElse(null);
-        if (row == null || row[0] == null || row[1] == null)
+        String merchantNo = jdbc.sql("SELECT gateway_merchant_no FROM payments WHERE provider_payment_id = ?")
+                .param(providerPaymentId).query(String.class).optional().orElse(null);
+        if (merchantNo == null)
             throw notProvisioned("payment " + providerPaymentId + " không lưu danh tính gateway");
-        OrganizerGatewayBinding binding = bindings.findByGatewayMerchantNoAndProvider(row[0], BANKSIM)
-                .orElseThrow(() -> notProvisioned("không tìm thấy binding cho merchant " + row[0]));
-        return new GatewayMerchantContext(row[0], row[1], cipher.decrypt(binding.getEncryptedMerchantSecret()));
+        return contextOf(bindingOf(merchantNo));
     }
 
     public GatewayMerchantContext forRefundReference(String referenceId) {
@@ -76,24 +63,29 @@ public class GatewayCredentialResolver {
 
     private GatewayMerchantContext forRefund(String where, String value) {
         if (value == null || value.isBlank()) throw notProvisioned("thiếu mã refund");
-        var row = jdbc.sql("SELECT p.gateway_merchant_no, p.gateway_terminal_id FROM refunds r "
-                        + "JOIN payments p ON p.id = r.payment_id WHERE " + where)
+        var row = jdbc.sql("SELECT p.gateway_merchant_no FROM refunds r JOIN payments p ON p.id = r.payment_id WHERE " + where)
                 .param(value)
-                .query((rs, n) -> new String[]{rs.getString(1), rs.getString(2)})
+                .query((rs, n) -> new String[]{rs.getString(1)})
                 .optional().orElse(null);
         if (row == null) throw notProvisioned("không tìm thấy refund " + value);
-        if (row[0] == null || row[1] == null) return anyContext();
-        OrganizerGatewayBinding binding = bindings.findByGatewayMerchantNoAndProvider(row[0], BANKSIM)
-                .orElseThrow(() -> notProvisioned("không tìm thấy binding cho merchant " + row[0]));
-        return new GatewayMerchantContext(row[0], row[1], cipher.decrypt(binding.getEncryptedMerchantSecret()));
+        if (row[0] == null) return anyContext();
+        return contextOf(bindingOf(row[0]));
     }
 
     public GatewayMerchantContext anyContext() {
         OrganizerGatewayBinding binding = bindings
                 .findFirstByProviderAndStatusOrderByCreatedAtAsc(BANKSIM, OrganizerGatewayBinding.Status.ACTIVE)
                 .orElseThrow(() -> notProvisioned("chưa có ban tổ chức nào được cấp phát trên BankSim"));
-        return new GatewayMerchantContext(binding.getGatewayMerchantNo(), binding.getGatewayTerminalId(),
-                cipher.decrypt(binding.getEncryptedMerchantSecret()));
+        return contextOf(binding);
+    }
+
+    private OrganizerGatewayBinding bindingOf(String merchantNo) {
+        return bindings.findByGatewayMerchantNoAndProvider(merchantNo, BANKSIM)
+                .orElseThrow(() -> notProvisioned("không tìm thấy binding cho merchant " + merchantNo));
+    }
+
+    private GatewayMerchantContext contextOf(OrganizerGatewayBinding binding) {
+        return new GatewayMerchantContext(binding.getGatewayMerchantNo(), cipher.decrypt(binding.getEncryptedMerchantSecret()));
     }
 
     private static DomainException notProvisioned(String why) {
@@ -101,9 +93,6 @@ public class GatewayCredentialResolver {
                 "Organizer is not provisioned on BANKSIM (" + why + ")");
     }
 
-    public record GatewayMerchantContext(String merchantNo, String terminalId, String secret) {
-        public GatewayMerchantContext withTerminal(String otherTerminalId) {
-            return new GatewayMerchantContext(merchantNo, otherTerminalId, secret);
-        }
+    public record GatewayMerchantContext(String merchantNo, String secret) {
     }
 }

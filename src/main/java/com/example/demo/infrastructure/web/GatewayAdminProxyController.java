@@ -56,9 +56,9 @@ public class GatewayAdminProxyController {
         return service.setTerminalStatus(terminalId, String.valueOf(body.get("status")));
     }
 
-    @PutMapping("/merchants/{merNo}/active-terminal")
-    public Object activeTerminal(@PathVariable String merNo, @RequestBody Map<String, Object> body) {
-        return service.setActiveTerminal(merNo, body.get("terminalId") == null ? null : String.valueOf(body.get("terminalId")));
+    @PutMapping("/merchants/{merNo}/default-terminal")
+    public Object defaultTerminal(@PathVariable String merNo, @RequestBody Map<String, Object> body) {
+        return service.setDefaultTerminal(merNo, body.get("terminalId") == null ? null : String.valueOf(body.get("terminalId")));
     }
 
     @PutMapping("/terminals/{terminalId}/configuration")

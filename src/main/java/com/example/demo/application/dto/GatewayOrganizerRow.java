@@ -8,7 +8,6 @@ public record GatewayOrganizerRow(
         String contactEmail,
         String payoutAccount,
         String gatewayMerchantNo,
-        String gatewayTerminalId,
         String bindingStatus,
         String provisioningError,
         Long terminalCount,

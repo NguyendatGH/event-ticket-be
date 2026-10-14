@@ -1,45 +1,5 @@
 package com.example.demo.application.impl;
 
-import com.example.demo.application.CheckoutService;
-import com.example.demo.application.BuyerWalletService;
-import com.example.demo.application.GatewayAudit;
-import com.example.demo.application.IdempotencyService;
-import com.example.demo.application.LedgerService;
-import com.example.demo.application.OrderFulfilment;
-import com.example.demo.application.OrderQueries;
-import com.example.demo.application.PaymentMethodsService;
-import com.example.demo.application.PaymentGatewayRegistry;
-import com.example.demo.application.SellerWalletService;
-import com.example.demo.application.dto.CreateOrderRequest;
-import com.example.demo.application.dto.OrderResponse;
-
-import com.example.demo.domain.common.DomainException;
-import com.example.demo.domain.common.LogContext;
-import com.example.demo.domain.event.Event;
-import com.example.demo.domain.event.TicketTier;
-import com.example.demo.domain.idempotency.IdempotencyScope;
-import com.example.demo.domain.inventory.Inventory;
-import com.example.demo.domain.order.Order;
-import com.example.demo.domain.order.OrderItem;
-import com.example.demo.domain.payment.CreatePaymentCommand;
-import com.example.demo.domain.payment.MerchantGateway;
-import com.example.demo.domain.payment.Payment;
-import com.example.demo.domain.payment.PaymentGatewayPort;
-import com.example.demo.domain.payment.PaymentLink;
-import com.example.demo.domain.payment.PaymentStatus;
-import com.example.demo.infrastructure.persistence.EventRepository;
-import com.example.demo.infrastructure.persistence.InventoryRepository;
-import com.example.demo.infrastructure.persistence.OrderRepository;
-import com.example.demo.infrastructure.persistence.PaymentRepository;
-import com.example.demo.infrastructure.persistence.TicketTierRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionTemplate;
-
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -49,6 +9,48 @@ import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import com.example.demo.application.BuyerWalletService;
+import com.example.demo.application.CheckoutService;
+import com.example.demo.application.GatewayAudit;
+import com.example.demo.application.IdempotencyService;
+import com.example.demo.application.LedgerService;
+import com.example.demo.application.OrderFulfilment;
+import com.example.demo.application.OrderQueries;
+import com.example.demo.application.PaymentGatewayRegistry;
+import com.example.demo.application.PaymentMethodsService;
+import com.example.demo.application.PaymentService;
+import com.example.demo.application.SellerWalletService;
+import com.example.demo.application.dto.CreateOrderRequest;
+import com.example.demo.application.dto.OrderResponse;
+import com.example.demo.domain.common.DomainException;
+import com.example.demo.domain.common.LogContext;
+import com.example.demo.domain.event.Event;
+import com.example.demo.domain.event.TicketTier;
+import com.example.demo.domain.idempotency.IdempotencyScope;
+import com.example.demo.domain.inventory.Inventory;
+import com.example.demo.domain.order.Order;
+import com.example.demo.domain.order.OrderItem;
+import com.example.demo.domain.order.OrderStatus;
+import com.example.demo.domain.payment.CreatePaymentCommand;
+import com.example.demo.domain.payment.Payment;
+import com.example.demo.domain.payment.PaymentGatewayPort;
+import com.example.demo.domain.payment.PaymentLink;
+import com.example.demo.domain.payment.PaymentStatus;
+import com.example.demo.infrastructure.persistence.EventRepository;
+import com.example.demo.infrastructure.persistence.InventoryRepository;
+import com.example.demo.infrastructure.persistence.OrderRepository;
+import com.example.demo.infrastructure.persistence.PaymentRepository;
+import com.example.demo.infrastructure.persistence.TicketTierRepository;
 
 @Service
 public class CheckoutServiceImpl implements CheckoutService {
@@ -65,6 +67,7 @@ public class CheckoutServiceImpl implements CheckoutService {
     private final IdempotencyService idempotency;
     private final PaymentGatewayRegistry gateways;
     private final PaymentMethodsService paymentMethods;
+    private final PaymentService paymentService;
     private final BuyerWalletService buyerWallet;
     private final SellerWalletService sellerWallet;
     private final LedgerService ledger;
@@ -76,15 +79,16 @@ public class CheckoutServiceImpl implements CheckoutService {
     private final String cancelUrl;
 
     public CheckoutServiceImpl(EventRepository events, TicketTierRepository tiers, InventoryRepository inventory,
-                               OrderRepository orders, PaymentRepository payments, OrderFulfilment fulfilment,
-                               OrderQueries orderQueries, IdempotencyService idempotency,
-                               GatewayAudit audit, TransactionTemplate tx,
-                               PaymentGatewayRegistry gateways, PaymentMethodsService paymentMethods,
-                               BuyerWalletService buyerWallet, SellerWalletService sellerWallet, LedgerService ledger,
-                               @Value("${app.checkout.order-ttl}") Duration orderTtl,
-                               @Value("${app.checkout.fee}") long fee,
-                               @Value("${app.payment.return-url}") String returnUrl,
-                               @Value("${app.payment.cancel-url}") String cancelUrl) {
+            OrderRepository orders, PaymentRepository payments, OrderFulfilment fulfilment,
+            OrderQueries orderQueries, IdempotencyService idempotency,
+            GatewayAudit audit, TransactionTemplate tx,
+            PaymentGatewayRegistry gateways, PaymentMethodsService paymentMethods,
+            @Lazy PaymentService paymentService,
+            BuyerWalletService buyerWallet, SellerWalletService sellerWallet, LedgerService ledger,
+            @Value("${app.checkout.order-ttl}") Duration orderTtl,
+            @Value("${app.checkout.fee}") long fee,
+            @Value("${app.payment.return-url}") String returnUrl,
+            @Value("${app.payment.cancel-url}") String cancelUrl) {
         this.events = events;
         this.tiers = tiers;
         this.inventory = inventory;
@@ -95,6 +99,7 @@ public class CheckoutServiceImpl implements CheckoutService {
         this.idempotency = idempotency;
         this.gateways = gateways;
         this.paymentMethods = paymentMethods;
+        this.paymentService = paymentService;
         this.buyerWallet = buyerWallet;
         this.sellerWallet = sellerWallet;
         this.ledger = ledger;
@@ -117,32 +122,45 @@ public class CheckoutServiceImpl implements CheckoutService {
         log.info("running checkout process --");
         Event requestedEvent = events.findById(req.eventId())
                 .orElseThrow(() -> DomainException.notFound("EVENT_NOT_FOUND", "Không tìm thấy sự kiện"));
-        String requestedMethod = req.paymentMethod() == null ? "" : req.paymentMethod().trim().toUpperCase(java.util.Locale.ROOT);
-        String paymentMethod = requestedMethod.equals("PAYOS") || requestedMethod.equals("BANKSIM") || requestedMethod.isBlank()
-                ? "CARD" : requestedMethod;
+        String requestedMethod = req.paymentMethod() == null ? ""
+                : req.paymentMethod().trim().toUpperCase(java.util.Locale.ROOT);
+        String paymentMethod = requestedMethod.equals("PAYOS") || requestedMethod.equals("BANKSIM")
+                || requestedMethod.isBlank()
+                        ? "CARD"
+                        : requestedMethod;
         var merchantSettings = paymentMethod.equals("WALLET") ? null : resolveMerchantSettings(requestedEvent);
         if (!paymentMethod.equals("WALLET") && !merchantSettings.supports(paymentMethod)) {
-            throw new DomainException(HttpStatus.CONFLICT, "PAYMENT_METHOD_NOT_ENABLED", "Phương thức thanh toán này chưa được merchant bật");
+            throw new DomainException(HttpStatus.CONFLICT, "PAYMENT_METHOD_NOT_ENABLED",
+                    "Phương thức thanh toán này chưa được merchant bật");
         }
+        if (userId != null)
+            cancelPendingOrders(userId, userId);
+
         Order order = tx.execute(s -> reserveTiers(req, idempotencyKey, userId));
         Event event = events.findById(order.getEventId()).orElseThrow();
-        if (paymentMethod.equals("WALLET")) return payWithWallet(order, event, userId);
+        if (paymentMethod.equals("WALLET"))
+            return payWithWallet(order, event, userId);
         PaymentGatewayPort gateway = gateways.forMerchant(merchantSettings.gateway());
 
         CreatePaymentCommand command = new CreatePaymentCommand(event.getOrganizerId(), order.getOrderCode(),
                 order.getTotalAmount(), "Ve " + order.getOrderCode(), paymentMethod,
-                order.getItems().stream().map(i -> new CreatePaymentCommand.Item(i.getTierName(), i.getQuantity(), i.getUnitPrice())).toList(),
+                order.getItems().stream()
+                        .map(i -> new CreatePaymentCommand.Item(i.getTierName(), i.getQuantity(), i.getUnitPrice()))
+                        .toList(),
                 returnUrl + "?orderId=" + order.getId(), cancelUrl + "?orderId=" + order.getId(), order.getExpiresAt());
         long startedAt = System.currentTimeMillis();
         try (LogContext.Scope ignored = LogContext.order(gateway.provider().name(), order.getOrderCode())) {
             try {
                 log.info("Sending create payment request");
                 PaymentLink link = gateway.createPaymentLink(command);
-                LogContext.trade(link.gatewayMerchantNo(), link.gatewayTerminalId(), link.providerPaymentId());
-                log.info("Payment link created: {}", link);
-                audit.record(order.getId(), "OUTBOUND", "createPaymentLink", command.masked(), link, 200, System.currentTimeMillis() - startedAt);
+                LogContext.trade(link.gatewayMerchantNo(), null, link.providerPaymentId());
+                log.info("Payment link created: providerPaymentId={} checkoutUrl={} returnUrl={} cancelUrl={}",
+                        link.providerPaymentId(), link.checkoutUrl(), command.returnUrl(), command.cancelUrl());
+                audit.record(order.getId(), "OUTBOUND", "createPaymentLink", command.masked(), link, 200,
+                        System.currentTimeMillis() - startedAt);
                 return tx.execute(s -> {
-                    Payment payment = payments.save(Payment.pending(order.getId(), gateway.provider(), link, order.getTotalAmount(), link.gatewayMerchantNo(), link.gatewayTerminalId()));
+                    Payment payment = payments.save(Payment.pending(order.getId(), gateway.provider(), link,
+                            order.getTotalAmount(), link.gatewayMerchantNo()));
                     return OrderResponse.from(orders.findById(order.getId()).orElseThrow(), event, List.of(), payment);
                 });
             } catch (RuntimeException ex) {
@@ -154,8 +172,10 @@ public class CheckoutServiceImpl implements CheckoutService {
                     fulfilment.release(o);
                 }));
                 if (ex instanceof DomainException domain
-                        && "GATEWAY_MERCHANT_NOT_PROVISIONED".equals(domain.getCode())) throw domain;
-                throw new DomainException(HttpStatus.BAD_GATEWAY, "PAYMENT_LINK_FAILED", "Cổng thanh toán không phản hồi, đơn đã hủy và trả vé. Thử lại sau.");
+                        && "GATEWAY_MERCHANT_NOT_PROVISIONED".equals(domain.getCode()))
+                    throw domain;
+                throw new DomainException(HttpStatus.BAD_GATEWAY, "PAYMENT_LINK_FAILED",
+                        "Cổng thanh toán không phản hồi, đơn đã hủy và trả vé. Thử lại sau.");
             }
         }
     }
@@ -205,7 +225,8 @@ public class CheckoutServiceImpl implements CheckoutService {
         for (CreateOrderRequest.Item item : req.items()) {
             if (!tierById.containsKey(item.tierId()))
                 throw DomainException.badRequest("TIER_NOT_FOUND", "Hạng vé " + item.tierId() + " không thuộc sự kiện");
-            if (item.quantity() < 1) throw DomainException.badRequest("QUANTITY_INVALID", "Số lượng vé phải lớn hơn 0");
+            if (item.quantity() < 1)
+                throw DomainException.badRequest("QUANTITY_INVALID", "Số lượng vé phải lớn hơn 0");
             qtyByTier.merge(item.tierId(), item.quantity(), Integer::sum);
         }
 
@@ -214,19 +235,23 @@ public class CheckoutServiceImpl implements CheckoutService {
             TicketTier tier = tierById.get(e.getKey());
             int qty = e.getValue();
             if (qty > tier.getMaxPerOrder()) {
-                throw DomainException.badRequest("QUANTITY_EXCEEDED", "Tối đa " + tier.getMaxPerOrder() + " vé " + tier.getName() + " mỗi đơn");
+                throw DomainException.badRequest("QUANTITY_EXCEEDED",
+                        "Tối đa " + tier.getMaxPerOrder() + " vé " + tier.getName() + " mỗi đơn");
             }
             Inventory inv = inventory.findWithLockByTicketTierId(tier.getId())
-                    .orElseThrow(() -> DomainException.conflict("TIER_SOLD_OUT", "Hạng vé " + tier.getName() + " chưa mở bán"));
+                    .orElseThrow(() -> DomainException.conflict("TIER_SOLD_OUT",
+                            "Hạng vé " + tier.getName() + " chưa mở bán"));
             if (!inv.canReserve(qty)) {
-                throw DomainException.conflict("TIER_SOLD_OUT", "Hạng vé " + tier.getName() + " không đủ số lượng (còn " + inv.getAvailable() + ")");
+                throw DomainException.conflict("TIER_SOLD_OUT",
+                        "Hạng vé " + tier.getName() + " không đủ số lượng (còn " + inv.getAvailable() + ")");
             }
             inv.reserve(qty);
             items.add(new OrderItem(tier.getId(), tier.getName(), qty, tier.getPrice()));
         }
 
-        return orders.save(Order.create(event.getId(), items, req.customer().name().trim(), req.customer().email().trim(),
-                req.customer().phone(), fee, Instant.now().plus(orderTtl), idempotencyKey, userId));
+        return orders
+                .save(Order.create(event.getId(), items, req.customer().name().trim(), req.customer().email().trim(),
+                        req.customer().phone(), fee, Instant.now().plus(orderTtl), idempotencyKey, userId));
     }
 
     @Override
@@ -240,16 +265,29 @@ public class CheckoutServiceImpl implements CheckoutService {
             closePayment(o);
             return o;
         });
-        payments.findFirstByOrderIdOrderByCreatedAtDesc(orderId).ifPresent(p -> cancelLinkQuietly(p, "customer cancelled"));
+        payments.findFirstByOrderIdOrderByCreatedAtDesc(orderId)
+                .ifPresent(p -> cancelLinkQuietly(p, "customer cancelled"));
         return tx.execute(s -> orderQueries.toResponse(orders.findById(order.getId()).orElseThrow()));
     }
 
+    private void cancelPendingOrders(UUID userId, UUID eventId) {
+        for (Order o : orders.findAllByUserIdAndEventIdAndStatus(userId, eventId, OrderStatus.PENDING_PAYMENT)) {
+            try {
+                paymentService.cancelOrder(userId, o.getEventId());
+            } catch (DomainException ex) {
+                log.info("Keep order: {}: {}", o.getOrderCode(), ex.getCode());
+            } catch (RuntimeException ex) {
+                log.warn("Cannot cancel old order {}: {}", o.getOrderCode(), ex.toString());
+            }
+        }
+    }
 
     @Override
     @Transactional
     public boolean expire(UUID orderId) {
         Order order = orders.findWithLockById(orderId).orElse(null);
-        if (order == null || !order.isPending()) return false;
+        if (order == null || !order.isPending())
+            return false;
         order.expire();
         fulfilment.release(order);
         closePayment(order);
@@ -259,7 +297,8 @@ public class CheckoutServiceImpl implements CheckoutService {
     private void closePayment(Order order) {
         payments.findFirstByOrderIdOrderByCreatedAtDesc(order.getId()).ifPresent(p -> {
             if (p.getStatus() == PaymentStatus.UNDERPAID || p.getStatus() == PaymentStatus.OVERPAID) {
-                log.warn("Order {} đóng khi provider đã nhận {} tiền: chuyển MANUAL_REVIEW", order.getOrderCode(), p.getStatus());
+                log.warn("Order {} đóng khi provider đã nhận {} tiền: chuyển MANUAL_REVIEW", order.getOrderCode(),
+                        p.getStatus());
                 order.markManualReview();
             } else {
                 p.expire();
@@ -267,10 +306,10 @@ public class CheckoutServiceImpl implements CheckoutService {
         });
     }
 
-
     @Override
     public void cancelLinkQuietly(Payment payment, String reason) {
-        if (payment.isPaid() || payment.getProviderPaymentId() == null) return;
+        if (payment.isPaid() || payment.getProviderPaymentId() == null)
+            return;
         Map<String, String> request = Map.of("providerPaymentId", payment.getProviderPaymentId(), "reason", reason);
         long startedAt = System.currentTimeMillis();
         try {

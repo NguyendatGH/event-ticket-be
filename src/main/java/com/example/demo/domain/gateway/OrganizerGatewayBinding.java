@@ -27,8 +27,6 @@ public class OrganizerGatewayBinding {
     @Column(name = "gateway_merchant_no", length = 32)
     private String gatewayMerchantNo;
 
-    @Column(name = "gateway_terminal_id", length = 32)
-    private String gatewayTerminalId;
 
     @Column(name = "encrypted_merchant_secret", columnDefinition = "text")
     private String encryptedMerchantSecret;
@@ -67,9 +65,8 @@ public class OrganizerGatewayBinding {
         return b;
     }
 
-    public void activate(String merchantNo, String terminalId, String encryptedSecret) {
+    public void activate(String merchantNo, String encryptedSecret) {
         this.gatewayMerchantNo = merchantNo;
-        this.gatewayTerminalId = terminalId;
         this.encryptedMerchantSecret = encryptedSecret;
         this.status = Status.ACTIVE;
         this.provisioningError = null;
@@ -91,12 +88,6 @@ public class OrganizerGatewayBinding {
         touch();
     }
 
-    public void useTerminal(String terminalId) {
-        this.gatewayTerminalId = terminalId;
-        this.lastSyncAt = Instant.now();
-        touch();
-    }
-
     public void replaceSecret(String encryptedSecret) {
         this.encryptedMerchantSecret = encryptedSecret;
         this.lastSyncAt = Instant.now();
@@ -104,8 +95,7 @@ public class OrganizerGatewayBinding {
     }
 
     public boolean isUsable() {
-        return status == Status.ACTIVE && gatewayMerchantNo != null && gatewayTerminalId != null
-                && encryptedMerchantSecret != null;
+        return status == Status.ACTIVE && gatewayMerchantNo != null && encryptedMerchantSecret != null;
     }
 
     private void touch() {

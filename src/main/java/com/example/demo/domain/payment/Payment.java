@@ -36,8 +36,6 @@ public class Payment {
     @Column(name = "gateway_merchant_no", length = 32)
     private String gatewayMerchantNo;
 
-    @Column(name = "gateway_terminal_id", length = 32)
-    private String gatewayTerminalId;
 
     @Column(name = "checkout_url")
     private String checkoutUrl;
@@ -76,11 +74,11 @@ public class Payment {
     private Instant updatedAt;
 
     public static Payment pending(UUID orderId, PaymentProvider provider, PaymentLink link, long amount) {
-        return pending(orderId, provider, link, amount, null, null);
+        return pending(orderId, provider, link, amount, null);
     }
 
     public static Payment pending(UUID orderId, PaymentProvider provider, PaymentLink link, long amount,
-                                  String gatewayMerchantNo, String gatewayTerminalId) {
+                                  String gatewayMerchantNo) {
         Payment p = new Payment();
         p.id = UUID.randomUUID();
         p.orderId = orderId;
@@ -91,7 +89,6 @@ public class Payment {
         p.qrCode = link.qrCode();
         p.amount = amount;
         p.gatewayMerchantNo = gatewayMerchantNo;
-        p.gatewayTerminalId = gatewayTerminalId;
         p.status = PaymentStatus.PENDING;
         p.createdAt = Instant.now();
         return p;

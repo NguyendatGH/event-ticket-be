@@ -8,7 +8,7 @@ Ba file trong thư mục này **không phải migration**, không chạy nối t
 | `gen-seed-sql.py` | Sinh `seed-dev.sql` từ `src/main/resources/seed/events.json` | Chỉ khi sửa `events.json` |
 | `demo-gia-re.sql` | Hạ giá vé xuống 1.000–2.000đ | Tùy chọn, chỉ khi demo thanh toán PayOS **thật** |
 
-Schema **không** nằm ở đây mà ở `src/main/resources/db/migration/` (Flyway `V1`–`V6`).
+Schema **không** nằm ở đây mà ở `src/main/resources/db/migration/` (Flyway, **một file duy nhất** `V1__init.sql`, chia mục theo nghiệp vụ).
 
 ## Clone về lần đầu
 

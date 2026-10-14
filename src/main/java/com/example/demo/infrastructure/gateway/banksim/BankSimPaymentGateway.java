@@ -48,24 +48,30 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
     private static final String SIGNATURE_HEADER = "x-mock-signature";
     private final RestClient http;
     private final GatewayCredentialResolver credentials;
+    private final BankSimMerchantClient merchantApi;
     private final ObjectMapper json;
     private volatile SupportedBins supportedBins;
-    private final Map<java.util.UUID, Routing> supportedMethods = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<java.util.UUID, CachedMethods> supportedMethods = new java.util.concurrent.ConcurrentHashMap<>();
 
     public BankSimPaymentGateway(@Value("${app.bank-simulate.base-url}") String baseUrl,
-                                 GatewayCredentialResolver credentials,
-                                 ObjectMapper json) {
+            GatewayCredentialResolver credentials,
+            BankSimMerchantClient merchantApi,
+            ObjectMapper json) {
         this.http = RestClient.builder()
                 .baseUrl(baseUrl.replaceAll("/$", ""))
                 .requestFactory(new BufferingClientHttpRequestFactory(new JdkClientHttpRequestFactory()))
                 .requestInterceptor(BankSimPaymentGateway::logExchange)
                 .build();
         this.credentials = credentials;
+        this.merchantApi = merchantApi;
         log.info("BankSim gateway client: baseUrl={} (credential lấy theo từng organizer)", baseUrl);
         this.json = json;
     }
 
-    @Override public PaymentProvider provider() { return PaymentProvider.MOCK; }
+    @Override
+    public PaymentProvider provider() {
+        return PaymentProvider.MOCK;
+    }
 
     @Override
     public PaymentLink createPaymentLink(CreatePaymentCommand c) {
@@ -74,15 +80,13 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
             for (CreatePaymentCommand.Item item : c.items()) {
                 items.add(new BankItem(item.name(), item.quantity(), item.price()));
             }
-            GatewayCredentialResolver.GatewayMerchantContext binding = credentials.forOrganizer(c.organizerId());
-            GatewayCredentialResolver.GatewayMerchantContext ctx = binding.withTerminal(
-                    terminalFor(c.organizerId(), c.paymentMethod(), binding.terminalId()));
+            GatewayCredentialResolver.GatewayMerchantContext ctx = credentials.forOrganizer(c.organizerId());
             BankPaymentResponse response = post(ctx, "/api/v1/gateway/payments")
                     .body(new BankPaymentRequest(c.orderCode(), c.amount(), c.description(), c.paymentMethod(),
                             null, items, c.returnUrl(), c.cancelUrl(), c.expiresAt()))
                     .retrieve().body(BankPaymentResponse.class);
             return new PaymentLink(response.providerPaymentId(), response.checkoutUrl(), response.qrCode(),
-                    ctx.merchantNo(), ctx.terminalId());
+                    ctx.merchantNo());
         } catch (RestClientResponseException ex) {
             throw new IllegalStateException("BankSim rejected createPaymentLink: " + ex.getStatusCode()
                     + " " + ex.getResponseBodyAsString(), ex);
@@ -94,7 +98,8 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
     @Override
     public PaymentStatusResult getPaymentStatus(String providerPaymentId) {
         try (LogContext.Scope ignored = LogContext.withTrade(null, null, providerPaymentId)) {
-            BankPaymentStatus response = get(credentials.forProviderPaymentId(providerPaymentId), "/api/v1/gateway/payments/{id}", providerPaymentId)
+            BankPaymentStatus response = get(credentials.forProviderPaymentId(providerPaymentId),
+                    "/api/v1/gateway/payments/{id}", providerPaymentId)
                     .retrieve().body(BankPaymentStatus.class);
             return new PaymentStatusResult(statusOf(response.status()), response.amountPaid(),
                     response.transactionRef(), response.paidAt());
@@ -102,7 +107,8 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
     }
 
     private static PaymentStatusResult.Status statusOf(String status) {
-        if (status == null) return PaymentStatusResult.Status.PENDING;
+        if (status == null)
+            return PaymentStatusResult.Status.PENDING;
         return switch (status) {
             case "PAID" -> PaymentStatusResult.Status.PAID;
             case "UNDERPAID" -> PaymentStatusResult.Status.UNDERPAID;
@@ -115,7 +121,8 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
     @Override
     public void cancelPaymentLink(String providerPaymentId, String reason) {
         try (LogContext.Scope ignored = LogContext.withTrade(null, null, providerPaymentId)) {
-            post(credentials.forProviderPaymentId(providerPaymentId), "/api/v1/gateway/payments/{id}/cancel", providerPaymentId)
+            post(credentials.forProviderPaymentId(providerPaymentId), "/api/v1/gateway/payments/{id}/cancel",
+                    providerPaymentId)
                     .body(Map.of("reason", reason)).retrieve().toBodilessEntity();
         }
     }
@@ -141,12 +148,15 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
         }
         try {
             BankRefundResponse response = post(ctx, "/api/v1/gateway/refunds")
-                    .body(new BankRefundRequest(c.referenceId(), c.amount(), c.description(), c.toBin(), c.toAccountNumber(),
+                    .body(new BankRefundRequest(c.referenceId(), c.amount(), c.description(), c.toBin(),
+                            c.toAccountNumber(),
                             credentials.providerPaymentIdForRefundReference(c.referenceId()).orElse(null)))
                     .retrieve().body(BankRefundResponse.class);
-            return new RefundSubmitResult(response.providerRefundId(), RefundStatusResult.Status.valueOf(response.status()), json.writeValueAsString(response));
+            return new RefundSubmitResult(response.providerRefundId(),
+                    RefundStatusResult.Status.valueOf(response.status()), json.writeValueAsString(response));
         } catch (RestClientResponseException ex) {
-            if (ex.getStatusCode().is4xxClientError()) throw refundRejected(ex.getResponseBodyAsString());
+            if (ex.getStatusCode().is4xxClientError())
+                throw refundRejected(ex.getResponseBodyAsString());
             throw new GatewayTimeoutException("BankSim refund request failed", ex);
         } catch (RuntimeException ex) {
             throw new GatewayTimeoutException("BankSim refund request failed", ex);
@@ -174,35 +184,46 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
     @Override
     public RefundStatusResult getRefundStatus(String providerRefundId) {
         try (LogContext.Scope ignored = LogContext.withTrade(null, null, providerRefundId)) {
-            BankRefundResponse response = get(credentials.forProviderRefundId(providerRefundId), "/api/v1/gateway/refunds/{id}", providerRefundId)
+            BankRefundResponse response = get(credentials.forProviderRefundId(providerRefundId),
+                    "/api/v1/gateway/refunds/{id}", providerRefundId)
                     .retrieve().body(BankRefundResponse.class);
-            return new RefundStatusResult(RefundStatusResult.Status.valueOf(response.status()), response.providerRefundId(), response.failureCode(), response.failureReason(), Instant.now());
+            return new RefundStatusResult(RefundStatusResult.Status.valueOf(response.status()),
+                    response.providerRefundId(), response.failureCode(), response.failureReason(), Instant.now());
         }
     }
 
     @Override
     public Optional<RefundStatusResult> findRefundByReference(String referenceId) {
-        var response = http.get().uri(uri -> uri.path("/api/v1/gateway/refunds/by-reference").queryParam("referenceId", referenceId).build()).headers(h -> headers(h, credentials.forRefundReference(referenceId)))
+        var response = http.get()
+                .uri(uri -> uri.path("/api/v1/gateway/refunds/by-reference").queryParam("referenceId", referenceId)
+                        .build())
+                .headers(h -> headers(h, credentials.forRefundReference(referenceId)))
                 .retrieve().toEntity(BankRefundResponse.class);
-        if (response.getBody() == null) return Optional.empty();
+        if (response.getBody() == null)
+            return Optional.empty();
         BankRefundResponse r = response.getBody();
-        return Optional.of(new RefundStatusResult(RefundStatusResult.Status.valueOf(r.status()), r.providerRefundId(), r.failureCode(), r.failureReason(), Instant.now()));
+        return Optional.of(new RefundStatusResult(RefundStatusResult.Status.valueOf(r.status()), r.providerRefundId(),
+                r.failureCode(), r.failureReason(), Instant.now()));
     }
 
     @Override
     public long getPayoutBalance() {
-        BankBalanceResponse response = get(credentials.anyContext(), "/api/v1/gateway/payout/balance").retrieve().body(BankBalanceResponse.class);
+        BankBalanceResponse response = get(credentials.anyContext(), "/api/v1/gateway/payout/balance").retrieve()
+                .body(BankBalanceResponse.class);
         return response.available();
     }
 
     @Override
     public java.util.Optional<java.util.Set<String>> payoutableBankBins() {
         SupportedBins cached = supportedBins;
-        if (cached != null && cached.freshAt().isAfter(Instant.now().minusSeconds(60))) return cached.bins();
+        if (cached != null && cached.freshAt().isAfter(Instant.now().minusSeconds(60)))
+            return cached.bins();
         try {
-            SupportedBanksResponse response = http.get().uri("/api/v1/gateway/banks").retrieve().body(SupportedBanksResponse.class);
+            SupportedBanksResponse response = http.get().uri("/api/v1/gateway/banks").retrieve()
+                    .body(SupportedBanksResponse.class);
             java.util.Set<String> bins = response == null || response.bins() == null
-                    ? java.util.Set.of() : java.util.Set.copyOf(response.bins());
+                    ? java.util.Set.of()
+                    : java.util.Set.copyOf(response.bins());
             log.info("banksim chi được tới {} BIN: {}", bins.size(), bins);
             supportedBins = new SupportedBins(Optional.of(bins), Instant.now());
         } catch (RuntimeException ex) {
@@ -214,92 +235,61 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
 
     @Override
     public java.util.Optional<java.util.Set<String>> supportedPaymentMethods(java.util.UUID organizerId) {
-        Routing routing = routing(organizerId);
-        return routing == null ? Optional.empty() : routing.methods();
-    }
-
-    private Routing routing(java.util.UUID organizerId) {
-        if (organizerId == null) return null;
+        if (organizerId == null)
+            return Optional.empty();
+        CachedMethods cached = supportedMethods.get(organizerId);
+        if (cached != null && cached.freshAt().isAfter(Instant.now().minusSeconds(15)))
+            return cached.methods();
         GatewayCredentialResolver.GatewayMerchantContext ctx;
         try {
             ctx = credentials.forOrganizer(organizerId);
         } catch (com.example.demo.domain.common.DomainException ex) {
-            log.info("organizer={} chưa có terminal banksim dùng được ({}), chưa lọc phương thức", organizerId, ex.getCode());
-            return null;
+            log.info("organizer={} chưa có merchant banksim dùng được ({}), chưa lọc phương thức", organizerId,
+                    ex.getCode());
+            return Optional.empty();
         }
-        List<String> channelTerminals = credentials.channelTerminals(organizerId);
-        List<String> terminals = channelTerminals.isEmpty() ? List.of(ctx.terminalId()) : channelTerminals;
-        Routing cached = supportedMethods.get(organizerId);
-        if (cached != null && cached.terminals().equals(terminals)
-                && cached.freshAt().isAfter(Instant.now().minusSeconds(15))) return cached;
-
-        java.util.Set<String> union = new java.util.LinkedHashSet<>();
-        Map<String, String> terminalByMethod = new java.util.HashMap<>();
-        boolean anyAnswered = false;
-        for (String terminalId : terminals) {
-            try {
-                TerminalInfoResponse response = get(ctx.withTerminal(terminalId), "/api/v1/gateway/terminal")
-                        .retrieve().body(TerminalInfoResponse.class);
-                List<String> enabled = response == null || response.paymentMethods() == null ? List.of() : response.paymentMethods();
-                for (String method : enabled) {
-                    union.add(method);
-                    terminalByMethod.putIfAbsent(method, terminalId);
-                }
-                anyAnswered = true;
-                log.info("organizer={} banksim terminal {} trả được {} (đã tick {}, 3DS policy {})", organizerId, terminalId,
-                        enabled, response == null ? "?" : response.configuredPaymentMethods(),
-                        response == null ? "?" : response.threeDsPolicy());
-            } catch (RestClientResponseException ex) {
-                if (ex.getStatusCode().is4xxClientError()) {
-                    anyAnswered = true;
-                    log.warn("organizer={} gateway từ chối terminal {} ({})", organizerId, terminalId, ex.getStatusCode());
-                } else {
-                    log.warn("organizer={} gateway lỗi {} khi hỏi terminal {}", organizerId, ex.getStatusCode(), terminalId);
-                }
-            } catch (RuntimeException ex) {
-                log.warn("organizer={} không lấy được phương thức của terminal {}: {}", organizerId, terminalId, ex.toString());
-            }
+        Optional<java.util.Set<String>> methods;
+        try {
+            methods = Optional.of(java.util.Set.copyOf(merchantApi.paymentMethods(ctx)));
+            log.info("organizer={} banksim trả được {}", organizerId, methods.get());
+        } catch (com.example.demo.domain.common.DomainException ex) {
+            boolean refused = ex.getStatus().is4xxClientError();
+            log.warn("organizer={} gateway {} khi hỏi phương thức ({})", organizerId, refused ? "từ chối" : "lỗi",
+                    ex.getCode());
+            methods = refused ? Optional.of(java.util.Set.of()) : Optional.empty();
         }
-        Optional<java.util.Set<String>> methods = anyAnswered ? Optional.of(java.util.Set.copyOf(union)) : Optional.empty();
-        Routing routing = new Routing(terminals, methods, Map.copyOf(terminalByMethod), Instant.now());
-        supportedMethods.put(organizerId, routing);
-        return routing;
-    }
-
-    private String terminalFor(java.util.UUID organizerId, String method, String fallback) {
-        Routing routing = routing(organizerId);
-        if (routing == null) return fallback;
-        String chosen = routing.terminalByMethod().get(method);
-        return chosen != null ? chosen : routing.terminals().getFirst();
+        supportedMethods.put(organizerId, new CachedMethods(methods, Instant.now()));
+        return methods;
     }
 
     @Override
     public void forgetPaymentMethods(java.util.UUID organizerId) {
-        if (organizerId != null) supportedMethods.remove(organizerId);
+        if (organizerId != null)
+            supportedMethods.remove(organizerId);
     }
 
-    private record Routing(List<String> terminals, Optional<java.util.Set<String>> methods,
-                           Map<String, String> terminalByMethod, Instant freshAt) {}
+    private record CachedMethods(Optional<java.util.Set<String>> methods, Instant freshAt) {
+    }
 
-    private record TerminalInfoResponse(String merNo, String terminalId, String channel, String currency,
-                                        List<String> paymentMethods, String threeDsPolicy,
-                                        List<String> configuredPaymentMethods) {}
+    private record SupportedBins(java.util.Optional<java.util.Set<String>> bins, Instant freshAt) {
+    }
 
-    private record SupportedBins(java.util.Optional<java.util.Set<String>> bins, Instant freshAt) {}
-
-    private record SupportedBanksResponse(List<String> bins) {}
+    private record SupportedBanksResponse(List<String> bins) {
+    }
 
     @Override
     public RefundEvent verifyAndParseRefund(String rawBody, Map<String, String> headers) {
-        requireSignature(rawBody, headers);
         JsonNode n = json.readTree(rawBody);
-        return new RefundEvent(n.path("eventId").asText(), n.path("providerRefundId").asText(), n.path("referenceId").asText(),
-                RefundStatusResult.Status.valueOf(n.path("state").asText()), n.path("failureCode").isNull() ? null : n.path("failureCode").asText(),
+        requireRefundSignature(rawBody, headers, n);
+        return new RefundEvent(n.path("eventId").asText(), n.path("providerRefundId").asText(),
+                n.path("referenceId").asText(),
+                RefundStatusResult.Status.valueOf(n.path("state").asText()),
+                n.path("failureCode").isNull() ? null : n.path("failureCode").asText(),
                 n.path("failureReason").isNull() ? null : n.path("failureReason").asText(), rawBody);
     }
 
     private static ClientHttpResponse logExchange(HttpRequest request, byte[] body,
-                                                  ClientHttpRequestExecution execution) throws IOException {
+            ClientHttpRequestExecution execution) throws IOException {
         long startedAt = System.nanoTime();
         String call = request.getMethod() + " " + request.getURI().getPath();
         try (LogContext.Scope ignored = LogContext.withTrade(request.getHeaders().getFirst("X-Merchant-No"),
@@ -323,18 +313,19 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
         }
     }
 
-    private RestClient.RequestHeadersSpec<?> get(GatewayCredentialResolver.GatewayMerchantContext c, String path, Object... vars) {
+    private RestClient.RequestHeadersSpec<?> get(GatewayCredentialResolver.GatewayMerchantContext c, String path,
+            Object... vars) {
         return http.get().uri(path, vars).headers(h -> headers(h, c));
     }
 
-    private RestClient.RequestBodySpec post(GatewayCredentialResolver.GatewayMerchantContext c, String path, Object... vars) {
+    private RestClient.RequestBodySpec post(GatewayCredentialResolver.GatewayMerchantContext c, String path,
+            Object... vars) {
         return http.post().uri(path, vars).headers(h -> headers(h, c));
     }
 
     private void headers(org.springframework.http.HttpHeaders h, GatewayCredentialResolver.GatewayMerchantContext c) {
-            h.set("X-Merchant-No", c.merchantNo());
-            h.set("X-Terminal-Id", c.terminalId());
-            h.set("X-Merchant-Secret", c.secret());
+        h.set("X-Merchant-No", c.merchantNo());
+        h.set("X-Merchant-Secret", c.secret());
     }
 
     private static String paymentIdOf(JsonNode n) {
@@ -349,7 +340,10 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
 
     private String secretForWebhook(String rawBody) {
         try {
-            return credentials.forProviderPaymentId(paymentIdOf(json.readTree(rawBody))).secret();
+            String paymentId = paymentIdOf(json.readTree(rawBody));
+            GatewayCredentialResolver.GatewayMerchantContext ctx = credentials.forProviderPaymentId(paymentId);
+            LogContext.trade(ctx.merchantNo(), null, paymentId);
+            return ctx.secret();
         } catch (RuntimeException ex) {
             throw new InvalidWebhookSignatureException("Không xác định được merchant của webhook");
         }
@@ -357,29 +351,86 @@ public class BankSimPaymentGateway implements PaymentGatewayPort {
 
     private void requireSignature(String rawBody, Map<String, String> headers) {
         String supplied = headers.get(SIGNATURE_HEADER);
-        String secret = secretForWebhook(rawBody);
-        if (supplied == null || !MessageDigest.isEqual(sign(rawBody, secret).getBytes(StandardCharsets.UTF_8), supplied.getBytes(StandardCharsets.UTF_8)))
+        if (supplied == null || !supplied.matches("[0-9a-fA-F]{64}")) {
+            log.warn("Webhook payment thiếu hoặc sai định dạng header x-mock-signature");
             throw new InvalidWebhookSignatureException("Chữ ký webhook BankSim không hợp lệ");
+        }
+
+        String secret = secretForWebhook(rawBody);
+        byte[] expected = hmacBytes(rawBody, secret);
+        byte[] received = HexFormat.of().parseHex(supplied);
+        if (!MessageDigest.isEqual(expected, received)) {
+            log.warn("Webhook payment sai chữ ký: HMAC tính bằng secret merchant không khớp sig={}...",
+                    supplied.substring(0, 8));
+            throw new InvalidWebhookSignatureException("Chữ ký webhook BankSim không hợp lệ");
+        }
+        log.info("Webhook payment đúng chữ ký (secret merchant của giao dịch), sig={}...", supplied.substring(0, 8));
     }
 
-    private String sign(String rawBody, String secret) {
+    private void requireRefundSignature(String rawBody, Map<String, String> headers, JsonNode n) {
+        String supplied = headers.get(SIGNATURE_HEADER);
+        if (supplied == null || !supplied.matches("[0-9a-fA-F]{64}"))
+            throw new InvalidWebhookSignatureException("Chữ ký refund BankSim không hợp lệ");
+
+        String secret;
+        try {
+            String providerRefundId = textOrNull(n, "providerRefundId");
+            String referenceId = textOrNull(n, "referenceId");
+            GatewayCredentialResolver.GatewayMerchantContext ctx;
+            if (providerRefundId != null)
+                ctx = credentials.forProviderRefundId(providerRefundId);
+            else if (referenceId != null)
+                ctx = credentials.forRefundReference(referenceId);
+            else
+                throw new InvalidWebhookSignatureException("Thiếu định danh refund webhook");
+            LogContext.trade(ctx.merchantNo(), null, providerRefundId);
+            secret = ctx.secret();
+        } catch (RuntimeException ex) {
+            throw new InvalidWebhookSignatureException("Không xác định được merchant của refund webhook");
+        }
+        if (!MessageDigest.isEqual(hmacBytes(rawBody, secret), HexFormat.of().parseHex(supplied))) {
+            log.warn("Webhook refund sai chữ ký: HMAC tính bằng secret merchant không khớp sig={}...",
+                    supplied.substring(0, 8));
+            throw new InvalidWebhookSignatureException("Chữ ký refund BankSim không hợp lệ");
+        }
+        log.info("Webhook refund đúng chữ ký (secret merchant của refund), sig={}...", supplied.substring(0, 8));
+    }
+
+    private static byte[] hmacBytes(String rawBody, String secret) {
+        if (secret == null || secret.isBlank())
+            throw new InvalidWebhookSignatureException("Thiếu secret webhook BankSim");
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            return HexFormat.of().formatHex(mac.doFinal(rawBody.getBytes(StandardCharsets.UTF_8)));
-        } catch (java.security.GeneralSecurityException e) { throw new IllegalStateException(e); }
+            return mac.doFinal(rawBody.getBytes(StandardCharsets.UTF_8));
+        } catch (java.security.GeneralSecurityException ex) {
+            throw new IllegalStateException("Cannot verify BankSim HMAC", ex);
+        }
     }
 
     private record BankPaymentRequest(long orderCode, long amount, String description, String paymentMethod,
-                                      Boolean threeDs, List<BankItem> items,
-                                      String returnUrl, String cancelUrl, Instant expiresAt) {}
-    private record BankItem(String name, int quantity, long price) {}
-    private record BankPaymentResponse(String providerPaymentId, String checkoutUrl, String qrCode) {}
-    private record BankPaymentStatus(String status, long amountPaid, String transactionRef, Instant paidAt) {}
+            Boolean threeDs, List<BankItem> items,
+            String returnUrl, String cancelUrl, Instant expiresAt) {
+    }
 
+    private record BankItem(String name, int quantity, long price) {
+    }
 
-    private record BankRefundRequest(String referenceId, long amount, String description, String toBin, String toAccountNumber,
-                                     String providerPaymentId) {}
-    private record BankRefundResponse(String providerRefundId, String status, String failureCode, String failureReason) {}
-    private record BankBalanceResponse(long available) {}
+    private record BankPaymentResponse(String providerPaymentId, String checkoutUrl, String qrCode) {
+    }
+
+    private record BankPaymentStatus(String status, long amountPaid, String transactionRef, Instant paidAt) {
+    }
+
+    private record BankRefundRequest(String referenceId, long amount, String description, String toBin,
+            String toAccountNumber,
+            String providerPaymentId) {
+    }
+
+    private record BankRefundResponse(String providerRefundId, String status, String failureCode,
+            String failureReason) {
+    }
+
+    private record BankBalanceResponse(long available) {
+    }
 }

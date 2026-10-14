@@ -113,7 +113,7 @@ public class PaymentServiceImpl implements PaymentService {
         WebhookEvent webhook = webhookEvents.findById(webhookId).orElseThrow();
         Order order = orders.findWithLockByOrderCode(e.orderCode()).orElse(null);
         Payment payment = order == null ? null : payments.findFirstByOrderIdOrderByCreatedAtDesc(order.getId()).orElse(null);
-        if (payment != null) LogContext.trade(payment.getGatewayMerchantNo(), payment.getGatewayTerminalId(), null);
+        if (payment != null) LogContext.trade(payment.getGatewayMerchantNo(), null, null);
 
         WebhookProcessingResult result;
         if (order == null || payment == null) {
@@ -211,7 +211,7 @@ public class PaymentServiceImpl implements PaymentService {
     }
 
     private boolean pollAndApply(Order order, Payment payment) {
-        LogContext.trade(payment.getGatewayMerchantNo(), payment.getGatewayTerminalId(), payment.getProviderPaymentId());
+        LogContext.trade(payment.getGatewayMerchantNo(), null, payment.getProviderPaymentId());
         PaymentGatewayPort gateway = gateways.forProvider(payment.getProvider());
         long t0 = System.currentTimeMillis();
         PaymentStatusResult status;

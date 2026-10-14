@@ -64,7 +64,7 @@ public class GatewayAdminServiceImpl implements GatewayAdminService {
 
         List<GatewayOrganizerRow> rows = jdbc.sql("""
                         SELECT o.id, o.name, o.contact_email,
-                               a.bank_name, a.account_number, b.gateway_merchant_no, b.gateway_terminal_id,
+                               a.bank_name, a.account_number, b.gateway_merchant_no,
                                b.status, b.provisioning_error
                         FROM organizers o
                         LEFT JOIN organizer_bank_accounts a ON a.organizer_id = o.id AND a.is_default
@@ -79,7 +79,7 @@ public class GatewayAdminServiceImpl implements GatewayAdminService {
                     String merNo = rs.getString("gateway_merchant_no");
                     String status = rs.getString("status");
                     return new GatewayOrganizerRow(rs.getObject("id", UUID.class), rs.getString("name"),
-                            rs.getString("contact_email"), payout, merNo, rs.getString("gateway_terminal_id"),
+                            rs.getString("contact_email"), payout, merNo,
                             status, rs.getString("provisioning_error"),
                             merNo == null ? null : (gatewayUp ? counts.getOrDefault(merNo, 0L) : null),
                             !"ACTIVE".equals(status));
@@ -97,29 +97,8 @@ public class GatewayAdminServiceImpl implements GatewayAdminService {
 
     @Override public Object listMerchants() { return admin.listMerchants(); }
     @Override
-    @Transactional(readOnly = true)
     public Object merchant(String merNo) {
-        Object result = admin.merchant(merNo);
-        if (!(result instanceof Map<?, ?> map)) return result;
-        Map<String, Object> merged = new java.util.LinkedHashMap<>();
-        map.forEach((k, v) -> merged.put(String.valueOf(k), v));
-        merged.put("activeTerminalId", boundTerminal(merNo));
-        merged.put("channelTerminalIds", channelTerminals(merNo));
-        return merged;
-    }
-
-    private List<String> channelTerminals(String merNo) {
-        return jdbc.sql("""
-                        SELECT c.gateway_terminal_id FROM organizer_payment_channels c
-                        JOIN organizer_gateway_bindings b ON b.organizer_id = c.organizer_id AND b.provider = 'BANKSIM'
-                        WHERE b.gateway_merchant_no = ? AND c.status = 'ACTIVE' ORDER BY c.opened_at
-                        """)
-                .param(merNo).query(String.class).list();
-    }
-
-    private String boundTerminal(String merNo) {
-        return bindings.findByGatewayMerchantNoAndProvider(merNo, GatewayProvisioningServiceImpl.BANKSIM)
-                .map(OrganizerGatewayBinding::getGatewayTerminalId).orElse(null);
+        return admin.merchant(merNo);
     }
 
     @Override public Object terminals(String merNo) { return admin.terminals(merNo); }
@@ -199,46 +178,17 @@ public class GatewayAdminServiceImpl implements GatewayAdminService {
     @Override
     public Object createTerminal(String merNo, Map<String, Object> body, boolean activate) {
         Object result = admin.createTerminalRaw(merNo, body);
-        log.info("[ADMIN][TERMINAL_CREATED] actor=ADMIN merchantNo={} channel={} activate={}",
+        log.info("[ADMIN][TERMINAL_CREATED] actor=ADMIN merchantNo={} channel={} makeDefault={}",
                 merNo, body.get("channel"), activate);
-        if (!(result instanceof Map<?, ?> created)) return result;
-        Map<String, Object> out = new LinkedHashMap<>();
-        created.forEach((k, v) -> out.put(String.valueOf(k), v));
-        out.put("usedByEncore", bindCreated(merNo, created, activate));
-        return out;
-    }
-
-    private boolean bindCreated(String merNo, Map<?, ?> created, boolean activate) {
-        if (!"ACTIVE".equals(String.valueOf(created.get("status")))) return false;
-        OrganizerGatewayBinding binding = bindings
-                .findByGatewayMerchantNoAndProvider(merNo, GatewayProvisioningServiceImpl.BANKSIM).orElse(null);
-        if (binding == null) return false;
-        String previous = binding.getGatewayTerminalId();
-        if (!activate && previous != null && previousStillUsable(previous)) return false;
-
+        if (!activate || !(result instanceof Map<?, ?> created)) return result;
         String terminalId = String.valueOf(created.get("terminalId"));
-        binding.useTerminal(terminalId);
-        bindings.saveAndFlush(binding);
-        log.info("[ADMIN][BINDING_TERMINAL_CHANGED] actor=ADMIN merchantNo={} terminalId={} (trước đó {}{})",
-                merNo, terminalId, previous, activate ? "" : " không còn dùng được");
-        return true;
-    }
-
-    private boolean previousStillUsable(String terminalId) {
         try {
-            return terminalUsable(terminalId);
+            Object updated = admin.setDefaultTerminal(merNo, terminalId);
+            log.info("[ADMIN][DEFAULT_TERMINAL_CHANGED] actor=ADMIN merchantNo={} terminalId={}", merNo, terminalId);
+            return updated;
         } catch (DomainException ex) {
-            log.warn("[ADMIN] không kiểm được terminal {} ({}), giữ nguyên binding", terminalId, ex.getCode());
-            return true;
-        }
-    }
-
-    private boolean terminalUsable(String terminalId) {
-        try {
-            return admin.terminal(terminalId) instanceof Map<?, ?> t && "ACTIVE".equals(String.valueOf(t.get("status")));
-        } catch (DomainException ex) {
-            if (ex.getStatus() == HttpStatus.NOT_FOUND) return false;
-            throw ex;
+            log.warn("[ADMIN] terminal {} đã tạo nhưng chưa đặt làm mặc định được ({}: {})", terminalId, ex.getCode(), ex.getMessage());
+            return result;
         }
     }
 
@@ -256,49 +206,21 @@ public class GatewayAdminServiceImpl implements GatewayAdminService {
     }
 
     @Override
-    @Transactional
     public Object setTerminalStatus(String terminalId, String status) {
         if (!"ACTIVE".equals(status) && !"INACTIVE".equals(status))
             throw DomainException.badRequest("INVALID_STATUS", "status phải là ACTIVE hoặc INACTIVE");
-        if ("INACTIVE".equals(status)) {
-            bindings.findByGatewayTerminalIdAndProvider(terminalId, GatewayProvisioningServiceImpl.BANKSIM)
-                    .ifPresent(b -> {
-                        throw DomainException.conflict("TERMINAL_IN_USE",
-                                "Ban tổ chức đang dùng terminal này để thu tiền. Chọn terminal khác cho họ rồi mới tắt.");
-                    });
-            boolean channel = jdbc.sql("SELECT count(*) FROM organizer_payment_channels WHERE gateway_terminal_id = ? AND status = 'ACTIVE'")
-                    .param(terminalId).query(Long.class).single() > 0;
-            if (channel)
-                throw DomainException.conflict("TERMINAL_IN_USE",
-                        "Terminal này là một kênh nhận tiền ban tổ chức đang mở. Ban tổ chức phải xóa kênh đó trước.");
-        }
         Object result = admin.patchTerminalRaw(terminalId, Map.of("status", status));
         log.info("[ADMIN][TERMINAL_STATUS_CHANGED] actor=ADMIN terminalId={} status={}", terminalId, status);
         return result;
     }
 
     @Override
-    @Transactional
-    public Object setActiveTerminal(String merNo, String terminalId) {
+    public Object setDefaultTerminal(String merNo, String terminalId) {
         if (terminalId == null || terminalId.isBlank())
             throw DomainException.badRequest("TERMINAL_REQUIRED", "Thiếu terminalId");
-        OrganizerGatewayBinding binding = bindings
-                .findByGatewayMerchantNoAndProvider(merNo, GatewayProvisioningServiceImpl.BANKSIM)
-                .orElseThrow(() -> DomainException.conflict("GATEWAY_MERCHANT_NOT_PROVISIONED",
-                        "Merchant " + merNo + " chưa gắn với ban tổ chức nào"));
-        if (!(admin.terminal(terminalId) instanceof Map<?, ?> t))
-            throw DomainException.conflict("GATEWAY_ADMIN_REJECTED", "Gateway trả về dữ liệu terminal không đọc được");
-        if (!merNo.equals(String.valueOf(t.get("merNo"))))
-            throw DomainException.forbidden("TERMINAL_NOT_OWNED", "Terminal này thuộc merchant khác");
-        if (!"ACTIVE".equals(String.valueOf(t.get("status"))))
-            throw DomainException.conflict("TERMINAL_INACTIVE", "Terminal đang tắt, bật lên trước đã");
-
-        String previous = binding.getGatewayTerminalId();
-        binding.useTerminal(terminalId);
-        bindings.saveAndFlush(binding);
-        log.info("[ADMIN][BINDING_TERMINAL_CHANGED] actor=ADMIN merchantNo={} terminalId={} (trước đó {})",
-                merNo, terminalId, previous);
-        return Map.of("merNo", merNo, "activeTerminalId", terminalId);
+        Object result = admin.setDefaultTerminal(merNo, terminalId);
+        log.info("[ADMIN][DEFAULT_TERMINAL_CHANGED] actor=ADMIN merchantNo={} terminalId={}", merNo, terminalId);
+        return result;
     }
 
     @Override
