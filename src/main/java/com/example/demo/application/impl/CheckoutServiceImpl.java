@@ -77,19 +77,18 @@ public class CheckoutServiceImpl implements CheckoutService {
     private final long fee;
     private final String returnUrl;
     private final String cancelUrl;
-    
 
     public CheckoutServiceImpl(EventRepository events, TicketTierRepository tiers, InventoryRepository inventory,
-                               OrderRepository orders, PaymentRepository payments, OrderFulfilment fulfilment,
-                               OrderQueries orderQueries, IdempotencyService idempotency,
-                               GatewayAudit audit, TransactionTemplate tx,
-                               PaymentGatewayRegistry gateways, PaymentMethodsService paymentMethods,
-                               @Lazy PaymentService paymentService,
-                               BuyerWalletService buyerWallet, SellerWalletService sellerWallet, LedgerService ledger,
-                               @Value("${app.checkout.order-ttl}") Duration orderTtl,
-                               @Value("${app.checkout.fee}") long fee,
-                               @Value("${app.payment.return-url}") String returnUrl,
-                               @Value("${app.payment.cancel-url}") String cancelUrl) {
+            OrderRepository orders, PaymentRepository payments, OrderFulfilment fulfilment,
+            OrderQueries orderQueries, IdempotencyService idempotency,
+            GatewayAudit audit, TransactionTemplate tx,
+            PaymentGatewayRegistry gateways, PaymentMethodsService paymentMethods,
+            @Lazy PaymentService paymentService,
+            BuyerWalletService buyerWallet, SellerWalletService sellerWallet, LedgerService ledger,
+            @Value("${app.checkout.order-ttl}") Duration orderTtl,
+            @Value("${app.checkout.fee}") long fee,
+            @Value("${app.payment.return-url}") String returnUrl,
+            @Value("${app.payment.cancel-url}") String cancelUrl) {
         this.events = events;
         this.tiers = tiers;
         this.inventory = inventory;
@@ -123,24 +122,31 @@ public class CheckoutServiceImpl implements CheckoutService {
         log.info("running checkout process --");
         Event requestedEvent = events.findById(req.eventId())
                 .orElseThrow(() -> DomainException.notFound("EVENT_NOT_FOUND", "Không tìm thấy sự kiện"));
-        String requestedMethod = req.paymentMethod() == null ? "" : req.paymentMethod().trim().toUpperCase(java.util.Locale.ROOT);
-        String paymentMethod = requestedMethod.equals("PAYOS") || requestedMethod.equals("BANKSIM") || requestedMethod.isBlank()
-                ? "CARD" : requestedMethod;
+        String requestedMethod = req.paymentMethod() == null ? ""
+                : req.paymentMethod().trim().toUpperCase(java.util.Locale.ROOT);
+        String paymentMethod = requestedMethod.equals("PAYOS") || requestedMethod.equals("BANKSIM")
+                || requestedMethod.isBlank()
+                        ? "CARD"
+                        : requestedMethod;
         var merchantSettings = paymentMethod.equals("WALLET") ? null : resolveMerchantSettings(requestedEvent);
         if (!paymentMethod.equals("WALLET") && !merchantSettings.supports(paymentMethod)) {
-            throw new DomainException(HttpStatus.CONFLICT, "PAYMENT_METHOD_NOT_ENABLED", "Phương thức thanh toán này chưa được merchant bật");
+            throw new DomainException(HttpStatus.CONFLICT, "PAYMENT_METHOD_NOT_ENABLED",
+                    "Phương thức thanh toán này chưa được merchant bật");
         }
-        if(userId != null) cancelPendingOrders(userId, userId);
+        if (userId != null)
+            cancelPendingOrders(userId, userId);
 
-    
         Order order = tx.execute(s -> reserveTiers(req, idempotencyKey, userId));
         Event event = events.findById(order.getEventId()).orElseThrow();
-        if (paymentMethod.equals("WALLET")) return payWithWallet(order, event, userId);
+        if (paymentMethod.equals("WALLET"))
+            return payWithWallet(order, event, userId);
         PaymentGatewayPort gateway = gateways.forMerchant(merchantSettings.gateway());
 
         CreatePaymentCommand command = new CreatePaymentCommand(event.getOrganizerId(), order.getOrderCode(),
                 order.getTotalAmount(), "Ve " + order.getOrderCode(), paymentMethod,
-                order.getItems().stream().map(i -> new CreatePaymentCommand.Item(i.getTierName(), i.getQuantity(), i.getUnitPrice())).toList(),
+                order.getItems().stream()
+                        .map(i -> new CreatePaymentCommand.Item(i.getTierName(), i.getQuantity(), i.getUnitPrice()))
+                        .toList(),
                 returnUrl + "?orderId=" + order.getId(), cancelUrl + "?orderId=" + order.getId(), order.getExpiresAt());
         long startedAt = System.currentTimeMillis();
         try (LogContext.Scope ignored = LogContext.order(gateway.provider().name(), order.getOrderCode())) {
@@ -148,11 +154,13 @@ public class CheckoutServiceImpl implements CheckoutService {
                 log.info("Sending create payment request");
                 PaymentLink link = gateway.createPaymentLink(command);
                 LogContext.trade(link.gatewayMerchantNo(), null, link.providerPaymentId());
-               log.info("Payment link created: providerPaymentId={} checkoutUrl={} returnUrl={} cancelUrl={}",
-        link.providerPaymentId(), link.checkoutUrl(), command.returnUrl(), command.cancelUrl());
-                audit.record(order.getId(), "OUTBOUND", "createPaymentLink", command.masked(), link, 200, System.currentTimeMillis() - startedAt);
+                log.info("Payment link created: providerPaymentId={} checkoutUrl={} returnUrl={} cancelUrl={}",
+                        link.providerPaymentId(), link.checkoutUrl(), command.returnUrl(), command.cancelUrl());
+                audit.record(order.getId(), "OUTBOUND", "createPaymentLink", command.masked(), link, 200,
+                        System.currentTimeMillis() - startedAt);
                 return tx.execute(s -> {
-                    Payment payment = payments.save(Payment.pending(order.getId(), gateway.provider(), link, order.getTotalAmount(), link.gatewayMerchantNo()));
+                    Payment payment = payments.save(Payment.pending(order.getId(), gateway.provider(), link,
+                            order.getTotalAmount(), link.gatewayMerchantNo()));
                     return OrderResponse.from(orders.findById(order.getId()).orElseThrow(), event, List.of(), payment);
                 });
             } catch (RuntimeException ex) {
@@ -164,8 +172,10 @@ public class CheckoutServiceImpl implements CheckoutService {
                     fulfilment.release(o);
                 }));
                 if (ex instanceof DomainException domain
-                        && "GATEWAY_MERCHANT_NOT_PROVISIONED".equals(domain.getCode())) throw domain;
-                throw new DomainException(HttpStatus.BAD_GATEWAY, "PAYMENT_LINK_FAILED", "Cổng thanh toán không phản hồi, đơn đã hủy và trả vé. Thử lại sau.");
+                        && "GATEWAY_MERCHANT_NOT_PROVISIONED".equals(domain.getCode()))
+                    throw domain;
+                throw new DomainException(HttpStatus.BAD_GATEWAY, "PAYMENT_LINK_FAILED",
+                        "Cổng thanh toán không phản hồi, đơn đã hủy và trả vé. Thử lại sau.");
             }
         }
     }
@@ -215,7 +225,8 @@ public class CheckoutServiceImpl implements CheckoutService {
         for (CreateOrderRequest.Item item : req.items()) {
             if (!tierById.containsKey(item.tierId()))
                 throw DomainException.badRequest("TIER_NOT_FOUND", "Hạng vé " + item.tierId() + " không thuộc sự kiện");
-            if (item.quantity() < 1) throw DomainException.badRequest("QUANTITY_INVALID", "Số lượng vé phải lớn hơn 0");
+            if (item.quantity() < 1)
+                throw DomainException.badRequest("QUANTITY_INVALID", "Số lượng vé phải lớn hơn 0");
             qtyByTier.merge(item.tierId(), item.quantity(), Integer::sum);
         }
 
@@ -224,19 +235,23 @@ public class CheckoutServiceImpl implements CheckoutService {
             TicketTier tier = tierById.get(e.getKey());
             int qty = e.getValue();
             if (qty > tier.getMaxPerOrder()) {
-                throw DomainException.badRequest("QUANTITY_EXCEEDED", "Tối đa " + tier.getMaxPerOrder() + " vé " + tier.getName() + " mỗi đơn");
+                throw DomainException.badRequest("QUANTITY_EXCEEDED",
+                        "Tối đa " + tier.getMaxPerOrder() + " vé " + tier.getName() + " mỗi đơn");
             }
             Inventory inv = inventory.findWithLockByTicketTierId(tier.getId())
-                    .orElseThrow(() -> DomainException.conflict("TIER_SOLD_OUT", "Hạng vé " + tier.getName() + " chưa mở bán"));
+                    .orElseThrow(() -> DomainException.conflict("TIER_SOLD_OUT",
+                            "Hạng vé " + tier.getName() + " chưa mở bán"));
             if (!inv.canReserve(qty)) {
-                throw DomainException.conflict("TIER_SOLD_OUT", "Hạng vé " + tier.getName() + " không đủ số lượng (còn " + inv.getAvailable() + ")");
+                throw DomainException.conflict("TIER_SOLD_OUT",
+                        "Hạng vé " + tier.getName() + " không đủ số lượng (còn " + inv.getAvailable() + ")");
             }
             inv.reserve(qty);
             items.add(new OrderItem(tier.getId(), tier.getName(), qty, tier.getPrice()));
         }
 
-        return orders.save(Order.create(event.getId(), items, req.customer().name().trim(), req.customer().email().trim(),
-                req.customer().phone(), fee, Instant.now().plus(orderTtl), idempotencyKey, userId));
+        return orders
+                .save(Order.create(event.getId(), items, req.customer().name().trim(), req.customer().email().trim(),
+                        req.customer().phone(), fee, Instant.now().plus(orderTtl), idempotencyKey, userId));
     }
 
     @Override
@@ -250,19 +265,19 @@ public class CheckoutServiceImpl implements CheckoutService {
             closePayment(o);
             return o;
         });
-        payments.findFirstByOrderIdOrderByCreatedAtDesc(orderId).ifPresent(p -> cancelLinkQuietly(p, "customer cancelled"));
+        payments.findFirstByOrderIdOrderByCreatedAtDesc(orderId)
+                .ifPresent(p -> cancelLinkQuietly(p, "customer cancelled"));
         return tx.execute(s -> orderQueries.toResponse(orders.findById(order.getId()).orElseThrow()));
     }
 
-
-    private void cancelPendingOrders(UUID userId, UUID eventId){
-        for (Order o: orders.findAllByUserIdAndEventIdAndStatus(userId, eventId, OrderStatus.PENDING_PAYMENT)){
-            try{
+    private void cancelPendingOrders(UUID userId, UUID eventId) {
+        for (Order o : orders.findAllByUserIdAndEventIdAndStatus(userId, eventId, OrderStatus.PENDING_PAYMENT)) {
+            try {
                 paymentService.cancelOrder(userId, o.getEventId());
             } catch (DomainException ex) {
-                    log.info("Keep order: {}: {}", o.getOrderCode(), ex.getCode());
+                log.info("Keep order: {}: {}", o.getOrderCode(), ex.getCode());
             } catch (RuntimeException ex) {
-                    log.warn("Cannot cancel old order {}: {}", o.getOrderCode(), ex.toString());
+                log.warn("Cannot cancel old order {}: {}", o.getOrderCode(), ex.toString());
             }
         }
     }
@@ -271,7 +286,8 @@ public class CheckoutServiceImpl implements CheckoutService {
     @Transactional
     public boolean expire(UUID orderId) {
         Order order = orders.findWithLockById(orderId).orElse(null);
-        if (order == null || !order.isPending()) return false;
+        if (order == null || !order.isPending())
+            return false;
         order.expire();
         fulfilment.release(order);
         closePayment(order);
@@ -281,7 +297,8 @@ public class CheckoutServiceImpl implements CheckoutService {
     private void closePayment(Order order) {
         payments.findFirstByOrderIdOrderByCreatedAtDesc(order.getId()).ifPresent(p -> {
             if (p.getStatus() == PaymentStatus.UNDERPAID || p.getStatus() == PaymentStatus.OVERPAID) {
-                log.warn("Order {} đóng khi provider đã nhận {} tiền: chuyển MANUAL_REVIEW", order.getOrderCode(), p.getStatus());
+                log.warn("Order {} đóng khi provider đã nhận {} tiền: chuyển MANUAL_REVIEW", order.getOrderCode(),
+                        p.getStatus());
                 order.markManualReview();
             } else {
                 p.expire();
@@ -289,10 +306,10 @@ public class CheckoutServiceImpl implements CheckoutService {
         });
     }
 
-
     @Override
     public void cancelLinkQuietly(Payment payment, String reason) {
-        if (payment.isPaid() || payment.getProviderPaymentId() == null) return;
+        if (payment.isPaid() || payment.getProviderPaymentId() == null)
+            return;
         Map<String, String> request = Map.of("providerPaymentId", payment.getProviderPaymentId(), "reason", reason);
         long startedAt = System.currentTimeMillis();
         try {
